@@ -66,14 +66,29 @@ function upsertHttpJob(job) {
     "--time-zone", job.timeZone,
     "--uri", job.uri,
     "--http-method", "POST",
-    "--headers", `x-cron-secret=${job.secret}`,
     "--attempt-deadline", "300s",
   ];
   if (jobExists(job.name, job.project, job.location)) {
-    gcloud(["scheduler", "jobs", "update", "http", ...common]);
+    gcloud([
+      "scheduler",
+      "jobs",
+      "update",
+      "http",
+      ...common,
+      "--update-headers",
+      `x-cron-secret=${job.secret}`,
+    ]);
     return "updated";
   }
-  gcloud(["scheduler", "jobs", "create", "http", ...common]);
+  gcloud([
+    "scheduler",
+    "jobs",
+    "create",
+    "http",
+    ...common,
+    "--headers",
+    `x-cron-secret=${job.secret}`,
+  ]);
   return "created";
 }
 
@@ -86,6 +101,11 @@ const location = process.env.CLOUD_SCHEDULER_LOCATION ?? "us-central1";
 const timeZone = process.env.CLOUD_SCHEDULER_TIME_ZONE ?? "America/New_York";
 
 const jobs = [
+  {
+    name: "wadau-picks-backup",
+    schedule: "17 * * * *",
+    uri: `${baseUrl}/api/admin/backup-picks`,
+  },
   {
     name: "wadau-fixtures-daily",
     schedule: "5 6 * * *",
