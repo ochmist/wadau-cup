@@ -1,0 +1,94 @@
+runConfig:
+  runtime: nodejs20
+  minInstances: 0
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyC8PViwwJM5d5cVepxE0txrnH5fYBkeSuU
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: wadau-cup.firebaseapp.com
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: wadau-cup
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: wadau-cup.firebasestorage.app
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "953613944093"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: 1:953613944093:web:dc83f89e59f9354c0bcdf4
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_POOL_ID
+    value: default
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: FOOTBALL_DATA_API_KEY
+    secret: FOOTBALL_DATA_API_KEY
+  - variable: FOOTBALL_DATA_BASE_URL
+    value: https://api.football-data.org/v4
+    availability:
+      - RUNTIME
+  - variable: FOOTBALL_DATA_COMPETITION
+    value: WC
+    availability:
+      - RUNTIME
+  - variable: OPENFOOTBALL_FIXTURES_URL
+    value: https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json
+    availability:
+      - RUNTIME
+  - variable: REQUIRE_RESULT_CROSS_CHECK
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: API_FOOTBALL_API_KEY
+    secret: API_FOOTBALL_API_KEY
+  - variable: API_FOOTBALL_BASE_URL
+    value: https://v3.football.api-sports.io
+    availability:
+      - RUNTIME
+  - variable: API_FOOTBALL_LEAGUE_ID
+    value: "1"
+    availability:
+      - RUNTIME
+  - variable: API_FOOTBALL_SEASON
+    value: "2026"
+    availability:
+      - RUNTIME
+  - variable: ENABLE_LIVE_LAYER
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: LIVE_POLL_SECONDS
+    value: "540"
+    availability:
+      - RUNTIME
+  - variable: API_FOOTBALL_DAILY_CAP
+    value: "90"
+    availability:
+      - RUNTIME
+  - variable: SYNC_CRON_SECRET
+    secret: SYNC_CRON_SECRET
+  - variable: FULL_TIME_POLL_SECONDS
+    value: "75"
+    availability:
+      - RUNTIME

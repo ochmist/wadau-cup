@@ -1,0 +1,95 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthed() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return isAuthed() && request.auth.token.isAdmin == true;
+    }
+    function poolId() {
+      return request.auth.token.poolId;
+    }
+    function isPoolMember(pid) {
+      return isAuthed() && poolId() == pid;
+    }
+    function isApprovedPoolMember(pid) {
+      return isPoolMember(pid) && request.auth.token.approvalStatus != "pending";
+    }
+    function isOwner(uid) {
+      return isAuthed() && request.auth.uid == uid;
+    }
+    function poolLockAt(pid) {
+      return get(/databases/$(database)/documents/pools/$(pid)).data.lockAt;
+    }
+    function beforePoolLock(pid) {
+      return request.time < poolLockAt(pid);
+    }
+    function isDraftUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "picks",
+        "finalGoals",
+        "hasDrafted"
+      ]);
+    }
+
+    // ── Pool config ─────────────────────────────────────────────
+    match /pools/{poolId} {
+      allow read: if isPoolMember(poolId) || isAdmin();
+      allow write: if isAdmin() && isPoolMember(poolId);
+
+      // ── Players ───────────────────────────────────────────────
+      match /players/{uid} {
+        // pending members can read only themselves; approved members can read the pool.
+        allow read: if isAdmin() || isApprovedPoolMember(poolId) || (isPoolMember(poolId) && isOwner(uid));
+        // only admin or the player themselves can write their own doc
+        allow create: if isAdmin() && isPoolMember(poolId);
+        allow update: if isPoolMember(poolId) && (isAdmin() || (isOwner(uid) && beforePoolLock(poolId) && isDraftUpdate()));
+        allow delete: if isAdmin() && isPoolMember(poolId);
+      }
+
+      // ── Teams (seeded reference data) ────────────────────────
+      match /teams/{code} {
+        allow read: if isPoolMember(poolId) || isAdmin();
+        allow write: if false; // only admin SDK / bootstrap scripts
+      }
+
+      // ── Standings (computed, admin-written) ───────────────────
+      match /standings/{doc} {
+        allow read: if isApprovedPoolMember(poolId) || isAdmin();
+        allow write: if false; // only admin SDK (API route) writes here
+      }
+
+      // ── Results ───────────────────────────────────────────────
+      match /results/{matchId} {
+        allow read: if isPoolMember(poolId) || isAdmin();
+        allow write: if false; // only admin SDK
+      }
+
+      // ── Fixtures / live state / sync status ──────────────────
+      match /fixtures/{matchId} {
+        allow read: if isPoolMember(poolId) || isAdmin();
+        allow write: if false; // only admin SDK
+      }
+
+      match /liveState/{matchId} {
+        allow read: if isPoolMember(poolId) || isAdmin();
+        allow write: if false; // only admin SDK
+      }
+
+      match /sync/{doc} {
+        allow read: if isAdmin() && isPoolMember(poolId);
+        allow write: if false; // only admin SDK
+      }
+    }
+
+    // ── Join requests (public write, admin read) ──────────────
+    match /joinRequests/{id} {
+      allow create: if true; // anyone can submit a request
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}

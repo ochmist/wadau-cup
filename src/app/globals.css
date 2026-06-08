@@ -1,0 +1,624 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* =========================================================================
+   Wadau Cup — design system
+   Ported verbatim from the design handoff (wadau-components.jsx injectCSS).
+   Themed via a root class: .wc.wc-dark / .wc.wc-light (sets CSS vars).
+   ========================================================================= */
+
+.wc,
+.wc * {
+  box-sizing: border-box;
+}
+.wc {
+  font-family: var(--font-sans), "Hanken Grotesk", system-ui, sans-serif;
+  --mono: var(--font-mono), "Geist Mono", "SFMono-Regular", ui-monospace, monospace;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.wc-num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum" 1, "ss01" 1;
+  letter-spacing: -0.01em;
+}
+
+/* ---- DARK (broadcast) ---- */
+.wc-dark {
+  --bg: #0a0e13;
+  --bg-grad-1: #0e141c;
+  --bg-grad-2: #090c11;
+  --surface: #11161e;
+  --surface-2: #161d27;
+  --surface-3: #1b2330;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --text: #f3f6f9;
+  --dim: #8c97a6;
+  --faint: #5a6573;
+  --lime: #c6ff3a;
+  --lime-soft: rgba(198, 255, 58, 0.14);
+  --lime-line: rgba(198, 255, 58, 0.3);
+  --lime-ink: #c6ff3a;
+  --on-lime: #0a0e13;
+  --violet: #a074ff;
+  --violet-soft: rgba(160, 116, 255, 0.14);
+  --up: #c6ff3a;
+  --up-soft: rgba(198, 255, 58, 0.14);
+  --down: #ff6a4d;
+  --down-soft: rgba(255, 106, 77, 0.13);
+  --flat: #6b7280;
+  --gold: #e7c56a;
+  --gold-deep: #c99a38;
+  --gold-soft: rgba(231, 197, 106, 0.1);
+  --gold-line: rgba(231, 197, 106, 0.28);
+  --gold-grad: linear-gradient(135deg, #f4e2a1 0%, #e7c56a 38%, #c99a38 100%);
+  --track: rgba(255, 255, 255, 0.085);
+  --track-2: rgba(255, 255, 255, 0.26);
+  --flag-bg: #edf0f4;
+  --flag-bd: rgba(0, 0, 0, 0.14);
+  --flag-out-bg: rgba(255, 255, 255, 0.045);
+  --tip-bg: #1c2431;
+  --tip-fg: #f3f6f9;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 18px 50px -24px rgba(0, 0, 0, 0.7);
+}
+/* ---- LIGHT (editorial) ---- */
+.wc-light {
+  --bg: #f3f4f1;
+  --bg-grad-1: #f7f8f5;
+  --bg-grad-2: #eceee9;
+  --surface: #ffffff;
+  --surface-2: #f6f7f4;
+  --surface-3: #eff1ec;
+  --line: rgba(15, 20, 25, 0.09);
+  --line-2: rgba(15, 20, 25, 0.16);
+  --text: #0e141a;
+  --dim: #4b5560;
+  --faint: #6c7681;
+  --lime: #c6ff3a;
+  --lime-soft: rgba(150, 200, 20, 0.16);
+  --lime-line: rgba(120, 165, 10, 0.45);
+  --lime-ink: #4e8c00;
+  --on-lime: #0a0e13;
+  --violet: #6d40d6;
+  --violet-soft: rgba(109, 64, 214, 0.1);
+  --up: #2f8f3e;
+  --up-soft: rgba(47, 143, 62, 0.12);
+  --down: #d8442a;
+  --down-soft: rgba(216, 68, 42, 0.1);
+  --flat: #8a929c;
+  --gold: #9a7b1f;
+  --gold-deep: #7e631a;
+  --gold-soft: rgba(190, 150, 30, 0.1);
+  --gold-line: rgba(170, 135, 40, 0.32);
+  --gold-grad: linear-gradient(135deg, #d9be63 0%, #c0982b 55%, #9a7b1f 100%);
+  --track: rgba(15, 20, 25, 0.09);
+  --track-2: rgba(15, 20, 25, 0.24);
+  --flag-bg: #ffffff;
+  --flag-bd: rgba(15, 20, 25, 0.14);
+  --flag-out-bg: #e7eae4;
+  --tip-bg: #11161e;
+  --tip-fg: #ffffff;
+  --shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 12px 30px -18px rgba(15, 20, 25, 0.18);
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+}
+
+.wc-eyebrow {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.wc-gold-text {
+  color: var(--gold);
+}
+.wc-gold-fill {
+  color: var(--gold);
+}
+
+/* mover chip */
+.wc-mover {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px 3px 4px;
+  border-radius: 5px;
+  letter-spacing: 0;
+}
+.wc-mover svg {
+  width: 8px;
+  height: 8px;
+}
+.wc-mover.up {
+  color: var(--up);
+  background: var(--up-soft);
+}
+.wc-mover.down {
+  color: var(--down);
+  background: var(--down-soft);
+}
+.wc-mover.flat {
+  color: var(--flat);
+  background: transparent;
+  padding-left: 5px;
+}
+
+/* flag chips */
+.wc-flags {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.wc-flag {
+  font-size: 15px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+  -webkit-text-size-adjust: 100%;
+}
+.wc-flag.alive {
+  background: var(--flag-bg);
+  border: 1px solid var(--flag-bd);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+.wc-flag.out {
+  background: var(--flag-out-bg);
+  border: 1px solid var(--line);
+  filter: grayscale(1);
+  opacity: 0.42;
+}
+.wc-flag.out::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 50%;
+  height: 1.5px;
+  background: var(--text);
+  opacity: 0.6;
+  transform: rotate(-14deg);
+}
+.wc-flag:active {
+  transform: scale(0.9);
+}
+.wc-flag-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--tip-bg);
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  z-index: 30;
+  box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: default;
+}
+.wc-flag-tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--tip-bg);
+}
+.wc-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.wc-icon-btn:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+/* ceiling bar */
+.wc-bar {
+  position: relative;
+  height: 7px;
+  border-radius: 4px;
+  background: var(--track);
+  overflow: hidden;
+}
+.wc-bar-ceil {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: var(--track-2);
+  border-radius: 4px;
+}
+.wc-bar-cur {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: var(--lime);
+  border-radius: 4px;
+  box-shadow: 0 0 10px -1px var(--lime-line);
+}
+.wc-bar-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--text);
+  opacity: 0.5;
+}
+
+.wc-divider-money {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 20px;
+}
+.wc-divider-money .ln {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-line), transparent);
+}
+.wc-divider-money .lbl {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.wc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.wc-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  box-shadow: 0 0 0 3px var(--up-soft);
+}
+
+.wc-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--surface-3);
+  color: var(--dim);
+  flex: none;
+  letter-spacing: 0.02em;
+}
+.wc-tag-you {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--on-lime);
+  background: var(--lime);
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.wc-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.wc-leaderboard-notices {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 16px 28px 0;
+}
+
+/* buttons + icon buttons (ported from wadau-ui.jsx injectUICSS) */
+.wc-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  white-space: nowrap;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 15px 18px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.08s, opacity 0.15s, background 0.15s;
+  letter-spacing: -0.01em;
+}
+.wc-btn:active {
+  transform: scale(0.985);
+}
+.wc-btn-primary {
+  background: var(--lime);
+  color: var(--on-lime);
+  box-shadow: 0 8px 24px -10px var(--lime-line);
+}
+.wc-btn-primary:disabled {
+  background: var(--surface-3);
+  color: var(--faint);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.wc-btn-ghost {
+  background: transparent;
+  border-color: var(--line-2);
+  color: var(--text);
+}
+.wc-btn-gold {
+  background: var(--gold-grad);
+  color: #1a1206;
+  box-shadow: 0 8px 24px -10px var(--gold-line);
+}
+.wc-btn-dark {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.wc-iconbtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: border-color 0.12s;
+}
+.wc-iconbtn:hover {
+  border-color: var(--text);
+}
+
+/* tier badge */
+.wc-tier-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 17px;
+  flex: none;
+}
+
+/* finale podium — tighter padding + smaller title on mobile */
+.wc-podium {
+  padding: 22px 16px 0;
+}
+.wc-podium-title {
+  font-size: 22px;
+}
+@media (min-width: 900px) {
+  .wc-podium {
+    padding: 26px 28px 0;
+  }
+  .wc-podium-title {
+    font-size: 26px;
+  }
+}
+
+/* fixtures grid — stacked on mobile, 2-col on desktop */
+.wc-fixture-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 900px) {
+  .wc-fixture-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* filter chips (ported from wadau-ui.jsx) */
+.wc-chiprow {
+  display: flex;
+  gap: 7px;
+}
+.wc-chip {
+  appearance: none;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  touch-action: manipulation;
+}
+.wc-chip.on {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.wc-chip:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 2px;
+}
+
+/* bottom sheet + dialog animations (ported from wadau-ui.jsx) */
+.wc-sheet-grip {
+  width: 38px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  margin: 10px auto 4px;
+  flex: none;
+}
+@keyframes wc-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes wc-slideup {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* nav link (ported from desktop top-nav inline styles) */
+.wc-nav-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--dim);
+  position: relative;
+  padding-bottom: 3px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wc-nav-link:hover {
+  color: var(--text);
+}
+.wc-nav-link.active {
+  font-weight: 600;
+  color: var(--text);
+}
+.wc-nav-link.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -19px;
+  height: 2px;
+  background: var(--lime);
+}
+
+.wc-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--lime-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wc-back-link:hover {
+  color: var(--text);
+}
+
+/* auth card padding — tighter on mobile, roomier on desktop */
+.wc-auth-card {
+  padding: 28px 22px;
+}
+@media (min-width: 900px) {
+  .wc-auth-card {
+    padding: 34px 32px;
+  }
+}
+
+/* landing hero headline — 30px mobile, 40px desktop (README spec) */
+.wc-hero-headline {
+  font-size: 30px;
+}
+@media (min-width: 900px) {
+  .wc-hero-headline {
+    font-size: 40px;
+  }
+}
+
+/* responsive show/hide — desktop layout >= 900px, mobile layout below */
+@media (max-width: 899px) {
+  .wc-desktop-only {
+    display: none !important;
+  }
+  .wc-leaderboard-notices {
+    padding: 16px 18px 0;
+  }
+}
+@media (min-width: 900px) {
+  .wc-mobile-only {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wc *,
+  .wc *::before,
+  .wc *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
