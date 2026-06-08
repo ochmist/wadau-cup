@@ -28,6 +28,20 @@ function backupId(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
+function backupBucketCandidates() {
+  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "wadau-cup";
+  return Array.from(
+    new Set(
+      [
+        process.env.PICKS_BACKUP_STORAGE_BUCKET,
+        process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        `${projectId}.appspot.com`,
+        `${projectId}.firebasestorage.app`,
+      ].filter(Boolean) as string[],
+    ),
+  );
+}
+
 export async function POST(req: NextRequest) {
   if (!adminDb) {
     return NextResponse.json({ error: "Admin SDK not configured" }, { status: 503 });
@@ -84,21 +98,35 @@ export async function POST(req: NextRequest) {
 
     let storageBucket: string | null = null;
     let storagePath: string | null = null;
-    if (adminStorage && process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET) {
-      const bucket = adminStorage.bucket(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
-      await bucket.file(objectPath).save(json, {
-        contentType: "application/json",
-        metadata: {
-          cacheControl: "private, max-age=0, no-cache",
-          metadata: {
-            poolId: POOL_ID,
-            checksumSha256: checksum,
-            kind: "wadau-cup-picks-backup",
-          },
-        },
-      });
-      storageBucket = bucket.name;
-      storagePath = objectPath;
+    let storageError: string | null = null;
+    if (adminStorage) {
+      for (const bucketName of backupBucketCandidates()) {
+        try {
+          const bucket = adminStorage.bucket(bucketName);
+          await bucket.file(objectPath).save(json, {
+            contentType: "application/json",
+            metadata: {
+              cacheControl: "private, max-age=0, no-cache",
+              metadata: {
+                poolId: POOL_ID,
+                checksumSha256: checksum,
+                kind: "wadau-cup-picks-backup",
+              },
+            },
+          });
+          storageBucket = bucket.name;
+          storagePath = objectPath;
+          storageError = null;
+          break;
+        } catch (error) {
+          storageError = (error as Error).message;
+        }
+      }
+    } else {
+      storageError = "Admin Storage SDK not configured.";
+    }
+    if (storageError) {
+      storageError = storageError.slice(0, 500);
     }
 
     const metadata: Record<string, unknown> = {
@@ -111,6 +139,7 @@ export async function POST(req: NextRequest) {
       draftedCount: entries.length,
       createdAt: FieldValue.serverTimestamp(),
     };
+    if (storageError) metadata.storageError = storageError;
     // Local/emulator fallback: keep the payload when Storage is unavailable.
     if (!storagePath) metadata.payload = backup;
 
@@ -121,6 +150,7 @@ export async function POST(req: NextRequest) {
       id,
       storageBucket,
       storagePath,
+      storageError,
       checksumSha256: checksum,
       playerCount: playersSnap.size,
       draftedCount: entries.length,
