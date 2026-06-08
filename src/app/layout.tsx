@@ -7,6 +7,11 @@ export const metadata: Metadata = {
   title: "Wadau Cup — World Cup Pool",
   description:
     "Draft six nations. Outlast the wadau. A private, invite-only World Cup tiered-draft pool.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
