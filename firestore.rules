@@ -17,7 +17,10 @@ service cloud.firestore {
       return isAuthed() && poolId() == pid;
     }
     function isApprovedPoolMember(pid) {
-      return isPoolMember(pid) && request.auth.token.approvalStatus != "pending";
+      return isPoolMember(pid) && (
+        !request.auth.token.keys().hasAny(["approvalStatus"]) ||
+        request.auth.token.approvalStatus != "pending"
+      );
     }
     function isOwner(uid) {
       return isAuthed() && request.auth.uid == uid;

@@ -20,6 +20,14 @@ import type { PlayerDoc, StandingsDoc, JoinRequestDoc, PoolDoc, FixtureDoc, Live
 import type { ResultDoc } from "./types";
 import { draftRemainingByTier, type Tier } from "./data";
 
+function logSubscriptionError(label: string, err: { code?: string; message?: string }) {
+  if (err.code === "permission-denied") {
+    console.warn(label, err.code, err.message);
+  } else {
+    console.error(label, err.code, err.message);
+  }
+}
+
 // ── Collection refs ────────────────────────────────────────────────────────
 const poolRef = () => doc(db, "pools", POOL_ID);
 const playersCol = () => collection(db, "pools", POOL_ID, "players");
@@ -54,7 +62,7 @@ export function subscribeStandings(
     standingsRef(),
     (snap) => cb(snap.exists() ? normalizeStandingsDoc(snap.data() as StandingsDoc) : null),
     (err) => {
-      console.error("[subscribeStandings]", err.code, err.message);
+      logSubscriptionError("[subscribeStandings]", err);
       onError?.(err);
     },
   );
@@ -69,7 +77,7 @@ export function subscribePool(
     poolRef(),
     (snap) => cb(snap.exists() ? (snap.data() as PoolDoc) : null),
     (err) => {
-      console.error("[subscribePool]", err.code, err.message);
+      logSubscriptionError("[subscribePool]", err);
       onError?.(err);
     },
   );
@@ -85,7 +93,7 @@ export function subscribePlayer(
     playerRef(uid),
     (snap) => cb(snap.exists() ? normalizePlayerIdentity(snap.data() as PlayerDoc) : null),
     (err) => {
-      console.error("[subscribePlayer]", err.code, err.message);
+      logSubscriptionError("[subscribePlayer]", err);
       onError?.(err);
     },
   );
@@ -101,7 +109,7 @@ export function subscribePlayers(
     query(playersCol(), orderBy("joinedAt", "asc")),
     (snap) => cb(snap.docs.map((d) => ({ uid: d.id, ...normalizePlayerIdentity(d.data() as PlayerDoc) }))),
     (err) => {
-      console.error("[subscribePlayers]", err.code, err.message);
+      logSubscriptionError("[subscribePlayers]", err);
       onError?.(err);
     },
   );
@@ -117,7 +125,7 @@ export function subscribeResults(
     query(resultsCol(), orderBy("enteredAt", "desc")),
     (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as ResultDoc), id: d.id }))),
     (err) => {
-      console.error("[subscribeResults]", err.code, err.message);
+      logSubscriptionError("[subscribeResults]", err);
       onError?.(err);
     },
   );
@@ -133,7 +141,7 @@ export function subscribeFixtures(
     query(fixturesCol(), orderBy("kickoffAt", "asc")),
     (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as FixtureDoc), id: d.id }))),
     (err) => {
-      console.error("[subscribeFixtures]", err.code, err.message);
+      logSubscriptionError("[subscribeFixtures]", err);
       onError?.(err);
     },
   );
@@ -149,7 +157,7 @@ export function subscribeLiveState(
     liveStateCol(),
     (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as LiveStateDoc), id: d.id }))),
     (err) => {
-      console.error("[subscribeLiveState]", err.code, err.message);
+      logSubscriptionError("[subscribeLiveState]", err);
       onError?.(err);
     },
   );
@@ -163,7 +171,7 @@ export function subscribeSyncStatus(
     syncStatusRef(),
     (snap) => cb(snap.exists() ? (snap.data() as SyncStatusDoc) : null),
     (err) => {
-      console.error("[subscribeSyncStatus]", err.code, err.message);
+      logSubscriptionError("[subscribeSyncStatus]", err);
       onError?.(err);
     },
   );

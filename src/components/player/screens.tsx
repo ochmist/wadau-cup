@@ -7,17 +7,190 @@ import { useRouter } from "next/navigation";
 import { CeilingBar, MiniStanding, Mover, fmtKES } from "@/components/ds";
 import { Btn, PageHead, SectionLabel } from "@/components/ui";
 import { TeamLine } from "@/components/player/parts";
+import { T } from "@/lib/data";
 import { useStandings } from "@/hooks/useStandings";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
+import { useResults } from "@/hooks/useResults";
 import { useAuth } from "@/lib/auth";
 import { useCountdown } from "@/lib/countdown";
 import { EdgeBanner } from "@/components/edge/EdgeBanner";
 import { displayPhone } from "@/lib/phone";
-import type { SerializedPlayer } from "@/lib/types";
+import type { ResultWithId } from "@/lib/firestore";
+import type { SerializedPlayer, Tier } from "@/lib/types";
 import type { PlayerTeam } from "@/lib/data";
 
 // Sort helper shared by several views
 const sortByPts = (a: { pts: number }, b: { pts: number }) => b.pts - a.pts;
+
+function timestampMs(value: unknown) {
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+  if (value && typeof value === "object" && "seconds" in value && typeof value.seconds === "number") {
+    return value.seconds * 1000;
+  }
+  return 0;
+}
+
+function resultSortKey(result: ResultWithId) {
+  return timestampMs(result.enteredAt) || Number(result.id.replace(/\D/g, "")) || 0;
+}
+
+function resultScore(result: ResultWithId) {
+  if (result.sa == null || result.sb == null) return "";
+  const pens = result.pens ? ` · pens ${result.pens}` : "";
+  return `${result.sa}-${result.sb}${pens}`;
+}
+
+function scoringLabel(result: ResultWithId, teamCode: string) {
+  if (result.win === "draw") return "Draw";
+  if (result.round === "Final" && result.win === teamCode) return "Champion";
+  return "Win";
+}
+
+type PointEventTuple = [string, Tier, number];
+
+function pointEventTuple(value: unknown): PointEventTuple | null {
+  if (Array.isArray(value)) {
+    const [code, tier, points] = value;
+    return typeof code === "string" && typeof tier === "string" && typeof points === "number"
+      ? [code, tier as Tier, points]
+      : null;
+  }
+
+  if (value && typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    const code = row.code ?? row.team ?? row.teamCode;
+    const tier = row.tier;
+    const points = row.points ?? row.pts ?? row.value;
+    return typeof code === "string" && typeof tier === "string" && typeof points === "number"
+      ? [code, tier as Tier, points]
+      : null;
+  }
+
+  return null;
+}
+
+function teamPointEvents(team: PlayerTeam, results: ResultWithId[]) {
+  return [...results]
+    .sort((a, b) => resultSortKey(a) - resultSortKey(b))
+    .flatMap((result) => {
+      const matches = (result.pts ?? [])
+        .map(pointEventTuple)
+        .filter((entry): entry is PointEventTuple => Boolean(entry))
+        .filter(([code, tier, points]) => code === team.code && tier === team.tier && points > 0);
+      return matches.map(([, , points]) => {
+        const opponentCode = result.a === team.code ? result.b : result.a;
+        const opponent = T[opponentCode];
+        return {
+          id: result.id,
+          round: result.round,
+          label: scoringLabel(result, team.code),
+          opponentName: opponent?.n ?? opponentCode,
+          opponentFlag: opponent?.f ?? "🏳",
+          score: resultScore(result),
+          points,
+        };
+      });
+    });
+}
+
+function PointsBreakdown({
+  player,
+  results,
+  loading,
+}: {
+  player: SerializedPlayer;
+  results: ResultWithId[];
+  loading: boolean;
+}) {
+  const rows = player.teams.map((team) => {
+    const events = teamPointEvents(team, results);
+    const explained = events.reduce((sum, event) => sum + event.points, 0);
+    return { team, events, explained };
+  });
+  const explainedTotal = rows.reduce((sum, row) => sum + row.explained, 0);
+  const hasEvents = rows.some((row) => row.events.length > 0);
+
+  return (
+    <div className="wc-card" style={{ padding: "16px 16px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+        <SectionLabel>Points explained</SectionLabel>
+        <span className="wc-num" style={{ fontSize: 12.5, color: "var(--dim)", whiteSpace: "nowrap" }}>
+          {explainedTotal} of {player.points} pts
+        </span>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 8, lineHeight: 1.45 }}>
+        Player points are the sum of points earned by each drafted team from completed match results.
+      </div>
+      {loading ? (
+        <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>Loading scoring events…</div>
+      ) : !hasEvents ? (
+        <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>
+          No scoring events yet. This will fill in as match results are locked.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          {rows.map(({ team, events, explained }) => (
+            <div key={`${team.tier}-${team.code}`} style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--surface-2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: events.length ? "1px solid var(--line)" : "none" }}>
+                <span className={"wc-flag " + (team.alive ? "alive" : "out")} style={{ width: 26, height: 26, fontSize: 17 }}>
+                  {team.flag}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {team.name}
+                  </div>
+                  <div className="wc-eyebrow" style={{ marginTop: 2 }}>Tier {team.tier}</div>
+                </div>
+                <div className="wc-num" style={{ fontSize: 15, fontWeight: 700 }}>
+                  {team.pts}<span className="wc-eyebrow" style={{ marginLeft: 3 }}>pts</span>
+                </div>
+              </div>
+              {events.length ? (
+                <div>
+                  {events.map((event, index) => (
+                    <div
+                      key={`${event.id}-${index}`}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: 10,
+                        padding: "9px 12px",
+                        borderTop: index === 0 ? "none" : "1px solid var(--line)",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 650 }}>
+                          {event.round} · {event.label}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          vs {event.opponentFlag} {event.opponentName}{event.score ? ` · ${event.score}` : ""}
+                        </div>
+                      </div>
+                      <span className="wc-num" style={{ fontSize: 13, fontWeight: 800, color: "var(--lime-ink)", alignSelf: "center" }}>
+                        +{event.points}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: "9px 12px", fontSize: 12.5, color: "var(--dim)" }}>
+                  No points earned yet.
+                </div>
+              )}
+              {explained !== team.pts && (
+                <div style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--gold)", borderTop: "1px solid var(--line)" }}>
+                  Current team total is {team.pts}; visible locked-result events explain {explained}.
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ======================= MY PICKS ======================= //
 export function MyPicksScreen() {
@@ -306,17 +479,44 @@ export function MyPicksScreen() {
 // ======================= PLAYER DETAIL ======================= //
 export function PlayerScreen({ name }: { name: string }) {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, approvalStatus } = useAuth();
   // Use live standings so player data is real. useStandings only returns mock data
   // when Firebase is not configured at all.
   const { players: livePlayers, scaleMax: liveScaleMax, loading } = useStandings(user?.uid);
+  const { player: myPlayer, loading: myPlayerLoading } = useMyData();
+  const { results, loading: resultsLoading } = useResults();
   const countdown = useCountdown();
 
-  const players = livePlayers;
+  const myTeams = enrichPlayerTeams(myPlayer).map((t) => ({ ...t, alive: t.alive }));
+  const myPoints = myTeams.reduce((sum, team) => sum + team.pts, 0);
+  const myCeiling = myPoints + myTeams.reduce((sum, team) => sum + (team.alive ? team.rem : 0), 0);
+  const mySerialized: SerializedPlayer | null = user && myPlayer ? {
+    uid: user.uid,
+    name: myPlayer.name,
+    short: myPlayer.short,
+    phone: myPlayer.phone,
+    paid: myPlayer.paid,
+    approvalStatus: myPlayer.approvalStatus ?? approvalStatus,
+    passwordSet: myPlayer.passwordSet,
+    hasDrafted: myPlayer.hasDrafted,
+    finalGoals: myPlayer.finalGoals,
+    points: myPlayer.points || myPoints,
+    ceiling: myPlayer.ceiling || myCeiling,
+    rank: myPlayer.rank,
+    prevRank: myPlayer.prevRank,
+    mover: myPlayer.mover,
+    payout: myPlayer.payout,
+    aliveCount: myPlayer.aliveCount || myTeams.filter((team) => team.alive).length,
+    teams: myTeams,
+    me: true,
+  } : null;
+  const players = mySerialized
+    ? [mySerialized, ...livePlayers.filter((player) => player.uid !== mySerialized.uid)]
+    : livePlayers;
   const scaleMax = liveScaleMax || 100;
   const me = players.find((p) => p.me);
 
-  if (loading) {
+  if (loading || (user && myPlayerLoading)) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64, color: "var(--faint)", fontSize: 14 }}>Loading…</div>;
   }
 
@@ -453,6 +653,7 @@ export function PlayerScreen({ name }: { name: string }) {
             <div className="wc-eyebrow" aria-hidden style={{ visibility: "hidden", marginBottom: 8 }}>·</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {canViewPicks && Ceiling}{Gap}{canViewPicks && Tie}
+              {canViewPicks && <PointsBreakdown player={p} results={results} loading={resultsLoading} />}
             </div>
           </div>
         </div>
@@ -475,6 +676,9 @@ export function PlayerScreen({ name }: { name: string }) {
               {out.map((t, i) => <TeamLine key={t.code} t={t} last={i === out.length - 1} />)}
             </div>
             <div style={{ marginTop: 18 }}>{Tie}</div>
+            <div style={{ marginTop: 18 }}>
+              <PointsBreakdown player={p} results={results} loading={resultsLoading} />
+            </div>
           </>
         ) : (
           <div style={{ marginTop: 18 }}>{PrivatePicks}</div>

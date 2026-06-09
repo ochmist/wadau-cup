@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:validate": "NEXT_DIST_DIR=.next-validate next build",
     "start": "next start",
     "lint": "next lint",
     "seed": "node scripts/seed.mjs",

@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  distDir: process.env.NEXT_DIST_DIR || ".next",
 
   // Silence the firebase-admin / undici peer-dep warnings that appear in
   // Next.js Edge Runtime checks — we only use firebase-admin in Node.js
