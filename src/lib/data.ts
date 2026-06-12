@@ -5,7 +5,29 @@
 
 export type Tier = "A" | "B" | "C" | "D" | "E" | "F";
 
-export type TeamInfo = { n: string; f: string; t: Tier };
+export type TeamSquadPlayer = {
+  id: string;
+  name: string;
+  age: number | null;
+  number: number | null;
+  position: string | null;
+  photo: string | null;
+};
+
+export type TeamCoach = {
+  id: string;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+};
+
+export type TeamInfo = {
+  n: string;
+  f: string;
+  t: Tier;
+  coach?: TeamCoach | null;
+  players?: TeamSquadPlayer[];
+};
 
 // Team dictionary: code -> { n: name, f: flag emoji, t: tier }
 export const T: Record<string, TeamInfo> = {
@@ -216,6 +238,18 @@ export const GROUPS: Record<string, string> = {
   NOR: "I", PAN: "L", PAR: "D", POR: "K", QAT: "B", KSA: "H", SCO: "C", SEN: "I", RSA: "A", KOR: "A",
   ESP: "H", SWE: "F", SUI: "B", TUN: "F", TUR: "D", USA: "D", URU: "H", UZB: "K",
 };
+
+export const GROUP_ORDER = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"] as const;
+
+export function teamGroupRank(code: string) {
+  const group = GROUPS[code];
+  const index = GROUP_ORDER.indexOf(group as (typeof GROUP_ORDER)[number]);
+  return index >= 0 ? index : GROUP_ORDER.length;
+}
+
+export function compareTeamsByGroup(a: { code: string }, b: { code: string }) {
+  return teamGroupRank(a.code) - teamGroupRank(b.code) || a.code.localeCompare(b.code);
+}
 
 export type TierMeta = { label: string; win: number; blurb: string };
 

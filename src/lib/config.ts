@@ -18,8 +18,8 @@ export const matchDataConfig = {
   apiFootballSeason: process.env.API_FOOTBALL_SEASON ?? "2026",
   enableLiveLayer: process.env.ENABLE_LIVE_LAYER === "true",
   fullTimePollSeconds: Number(process.env.FULL_TIME_POLL_SECONDS ?? 75),
-  livePollSeconds: Number(process.env.LIVE_POLL_SECONDS ?? 540),
-  apiFootballDailyCap: Number(process.env.API_FOOTBALL_DAILY_CAP ?? 90),
+  livePollSeconds: Number(process.env.LIVE_POLL_SECONDS ?? 30),
+  apiFootballDailyCap: Number(process.env.API_FOOTBALL_DAILY_CAP ?? 6500),
   requireCrossCheck: process.env.REQUIRE_RESULT_CROSS_CHECK !== "false",
   syncCronSecret: process.env.SYNC_CRON_SECRET ?? "",
 };

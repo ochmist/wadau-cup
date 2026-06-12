@@ -79,11 +79,11 @@ env:
     availability:
       - RUNTIME
   - variable: LIVE_POLL_SECONDS
-    value: "540"
+    value: "30"
     availability:
       - RUNTIME
   - variable: API_FOOTBALL_DAILY_CAP
-    value: "90"
+    value: "6500"
     availability:
       - RUNTIME
   - variable: SYNC_CRON_SECRET

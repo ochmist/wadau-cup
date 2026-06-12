@@ -48,6 +48,16 @@ function timestampMillis(value: unknown) {
   return 0;
 }
 
+function withoutUndefined<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(withoutUndefined) as T;
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
+      .map(([key, child]) => [key, withoutUndefined(child)]),
+  ) as T;
+}
+
 function hasLiveWindow(fixtures: FixtureDoc[], now = Date.now()) {
   return fixtures.some((fixture) => {
     if (fixture.status === "live") return true;
@@ -109,8 +119,8 @@ export async function POST(req: NextRequest) {
     const apiFootballCalls = Number(quotaSnap.get("calls") ?? 0);
     const apiFootballConfigured = Boolean(matchDataConfig.enableLiveLayer && matchDataConfig.apiFootballApiKey);
     const useApiFootballFixtures = force || needsDailyFixtureRefresh || needsResultCatchup;
-    const apiFootballCallsThisSync = useApiFootballFixtures ? 2 : 1;
-    const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls + apiFootballCallsThisSync <= matchDataConfig.apiFootballDailyCap;
+    const estimatedApiFootballCalls = useApiFootballFixtures ? 160 : 12;
+    const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls + estimatedApiFootballCalls <= matchDataConfig.apiFootballDailyCap;
 
     const [adapterState, playersSnap] = await Promise.all([
       getMatchAdapterState({
@@ -127,16 +137,17 @@ export async function POST(req: NextRequest) {
     let liveCount = 0;
     let lockedResultCount = 0;
     let skippedManualCount = 0;
+    let clearedFixtureCount = 0;
     let clearedLiveCount = 0;
 
     for (const fixture of adapterState.fixtures) {
       const { result: _result, liveState: _liveState, ...fixtureDoc } = fixture;
       batch.set(
         adminDb.doc(`pools/${POOL_ID}/fixtures/${fixture.id}`),
-        {
+        withoutUndefined({
           ...fixtureDoc,
           lastSyncedAt: FieldValue.serverTimestamp(),
-        },
+        }),
         { merge: true },
       );
       fixtureCount += 1;
@@ -169,17 +180,34 @@ export async function POST(req: NextRequest) {
       lockedResultCount += 1;
     }
 
+    const nextFixtureIds = new Set(adapterState.fixtures.map((fixture) => fixture.id));
+    for (const fixtureDoc of existingFixturesSnap.docs) {
+      if (nextFixtureIds.has(fixtureDoc.id)) continue;
+      batch.delete(fixtureDoc.ref);
+      clearedFixtureCount += 1;
+    }
+
     for (const live of adapterState.liveState) {
       batch.set(
         adminDb.doc(`pools/${POOL_ID}/liveState/${live.fixtureId}`),
-        {
+        withoutUndefined({
           id: live.fixtureId,
           ...live,
           updatedAt: FieldValue.serverTimestamp(),
-        },
+        }),
         { merge: true },
       );
       liveCount += 1;
+    }
+    for (const team of adapterState.teamProfiles) {
+      batch.set(
+        adminDb.doc(`pools/${POOL_ID}/teams/${team.code}`),
+        withoutUndefined({
+          ...team,
+          updatedAt: FieldValue.serverTimestamp(),
+        }),
+        { merge: true },
+      );
     }
     const nextLiveIds = new Set(adapterState.liveState.map((live) => live.fixtureId));
     for (const liveDoc of existingLiveSnap.docs) {
@@ -195,6 +223,8 @@ export async function POST(req: NextRequest) {
         warnings: adapterState.warnings,
         fixtureCount,
         liveCount,
+        teamProfileCount: adapterState.teamProfiles.length,
+        clearedFixtureCount,
         clearedLiveCount,
         lockedResultCount,
         skippedManualCount,
@@ -208,7 +238,7 @@ export async function POST(req: NextRequest) {
         quotaRef,
         {
           date: quotaDateKey(),
-          calls: FieldValue.increment(apiFootballCallsThisSync),
+          calls: FieldValue.increment(adapterState.apiFootballCalls),
           cap: matchDataConfig.apiFootballDailyCap,
           updatedAt: FieldValue.serverTimestamp(),
         },
@@ -223,6 +253,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       fixtureCount,
       liveCount,
+      teamProfileCount: adapterState.teamProfiles.length,
+      clearedFixtureCount,
       clearedLiveCount,
       lockedResultCount,
       skippedManualCount,
@@ -231,7 +263,7 @@ export async function POST(req: NextRequest) {
         configured: apiFootballConfigured,
         allowed: apiFootballAllowed,
         callsBeforeSync: apiFootballCalls,
-        callsThisSync: apiFootballConfigured && apiFootballAllowed ? apiFootballCallsThisSync : 0,
+        callsThisSync: apiFootballConfigured && apiFootballAllowed ? adapterState.apiFootballCalls : 0,
         cap: matchDataConfig.apiFootballDailyCap,
       },
       recompute,

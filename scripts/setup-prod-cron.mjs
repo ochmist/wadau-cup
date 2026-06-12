@@ -113,7 +113,7 @@ const jobs = [
   },
   {
     name: "wadau-results-poll",
-    schedule: "*/5 * * * *",
+    schedule: "* * * * *",
     uri: `${baseUrl}/api/admin/sync-results`,
   },
 ];

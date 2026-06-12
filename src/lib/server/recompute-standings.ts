@@ -1,6 +1,6 @@
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { POOL_ID } from "@/lib/config";
-import { T } from "@/lib/data";
+import { compareTeamsByGroup, T } from "@/lib/data";
 import { computeStandings, type RawPick } from "@/lib/standings";
 import type { PlayerDoc, PoolDoc, ResultDoc, Tier } from "@/lib/types";
 
@@ -78,7 +78,7 @@ export async function recomputeStandings(db: Firestore, poolId = POOL_ID) {
       ...t,
       name: T[t.code]?.n ?? t.code,
       flag: T[t.code]?.f ?? "🏳",
-    })),
+    })).sort(compareTeamsByGroup),
   }));
 
   await db.doc(`pools/${poolId}/standings/current`).set({

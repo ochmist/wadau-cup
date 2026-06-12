@@ -13,11 +13,13 @@ import { useAuth } from "@/lib/auth";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
 import { useFixtures } from "@/hooks/useFixtures";
+import type { MatchEventDoc } from "@/lib/types";
 
 type Game = {
   id: string;
   date: string;
   time: string;
+  kickoffAt?: string;
   a: string | null;
   b: string | null;
   aName?: string;
@@ -27,6 +29,11 @@ type Game = {
   status?: string;
   venue?: string | null;
   warning?: string | null;
+  minute?: number | null;
+  extra?: number | null;
+  statusShort?: string | null;
+  statusLong?: string | null;
+  events?: MatchEventDoc[];
   // present only on completed matches
   sa?: number;
   sb?: number;
@@ -40,12 +47,48 @@ const isFinal = (g: Game) => Boolean(g.win) && g.sa != null && g.sb != null;
 const hasScore = (g: Game) => g.sa != null && g.sb != null;
 const isTbdWarning = (warning?: string | null) => Boolean(warning && /\bTBD\b/i.test(warning));
 
-function dayLabel(date: string) {
-  const parsed = new Date(`${date}T12:00:00`);
+function localKickoffDate(g: Pick<Game, "date" | "time" | "kickoffAt">) {
+  const parsed = g.kickoffAt ? new Date(g.kickoffAt) : new Date(`${g.date}T${g.time}:00Z`);
+  return Number.isNaN(parsed.getTime()) ? new Date(`${g.date}T12:00:00`) : parsed;
+}
+
+function localDateKey(g: Pick<Game, "date" | "time" | "kickoffAt">) {
+  const parsed = localKickoffDate(g);
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dayLabel(g: Pick<Game, "date" | "time" | "kickoffAt">) {
+  const parsed = localKickoffDate(g);
   return {
     day: parsed.toLocaleDateString([], { weekday: "long" }),
     date: parsed.toLocaleDateString([], { month: "short", day: "numeric" }),
   };
+}
+
+function kickoffLabel(g: Game) {
+  const date = localKickoffDate(g);
+  if (Number.isNaN(date.getTime())) return g.time;
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function clockLabel(g: Game) {
+  if (g.statusShort === "HT") return "HT";
+  if (g.statusShort === "FT" || g.status === "finished") return "FT";
+  if (typeof g.minute === "number") return `${g.minute}${typeof g.extra === "number" && g.extra > 0 ? `+${g.extra}` : ""}'`;
+  return g.statusLong ?? "LIVE";
+}
+
+function minuteLabel(event: MatchEventDoc) {
+  if (typeof event.minute !== "number") return "";
+  return `${event.minute}${typeof event.extra === "number" && event.extra > 0 ? `+${event.extra}` : ""}'`;
+}
+
+function teamScorers(events: MatchEventDoc[] | undefined, teamCode: string | null) {
+  if (!teamCode) return [];
+  return (events ?? []).filter((event) => event.type === "goal" && event.team === teamCode && event.player);
 }
 
 type SideState = "win" | "lose" | "even";
@@ -105,6 +148,25 @@ function FixtureSide({
   );
 }
 
+function ScorerLine({ label, events, align }: { label: string; events: MatchEventDoc[]; align: "left" | "right" }) {
+  return (
+    <div
+      style={{
+        minWidth: 0,
+        textAlign: align,
+        fontSize: 11.5,
+        color: "var(--dim)",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+      title={`${label}: ${events.map((event) => `${event.player} ${minuteLabel(event)}`.trim()).join(", ")}`}
+    >
+      {events.map((event) => `${event.player} ${minuteLabel(event)}`.trim()).join(", ")}
+    </div>
+  );
+}
+
 function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
   const aMine = Boolean(g.a && mineCodes.includes(g.a));
   const bMine = Boolean(g.b && mineCodes.includes(g.b));
@@ -113,6 +175,8 @@ function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
   const draw = g.win === "draw";
   const aState: SideState = !played || draw ? "even" : g.win === g.a ? "win" : "lose";
   const bState: SideState = !played || draw ? "even" : g.win === g.b ? "win" : "lose";
+  const aScorers = teamScorers(g.events, g.a);
+  const bScorers = teamScorers(g.events, g.b);
 
   return (
     <div
@@ -128,15 +192,15 @@ function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         {played ? (
           <span className="wc-num" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", color: "var(--faint)" }}>
-            FT
+            {clockLabel(g)}
           </span>
         ) : g.status === "live" ? (
           <span className="wc-num" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", color: "var(--lime-ink)" }}>
-            LIVE
+            {clockLabel(g)}
           </span>
         ) : (
           <span className="wc-num" style={{ fontSize: 12, fontWeight: 600 }}>
-            {g.time}
+            {kickoffLabel(g)}
           </span>
         )}
         <span className="wc-pill" style={{ padding: "2px 8px", fontSize: 9 }}>
@@ -165,6 +229,21 @@ function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
         )}
         <FixtureSide code={g.b} label={g.bName} mine={bMine} align="right" state={bState} />
       </div>
+      {(aScorers.length > 0 || bScorers.length > 0) && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            gap: 10,
+            marginTop: 9,
+            alignItems: "start",
+          }}
+        >
+          <ScorerLine label={T[g.a ?? ""]?.n ?? g.aName ?? "Home"} events={aScorers} align="left" />
+          <span aria-hidden style={{ width: scoreVisible ? 46 : 18 }} />
+          <ScorerLine label={T[g.b ?? ""]?.n ?? g.bName ?? "Away"} events={bScorers} align="right" />
+        </div>
+      )}
       {g.warning && !isTbdWarning(g.warning) && (
         <div style={{ marginTop: 9, fontSize: 11.5, color: "var(--gold)", lineHeight: 1.35 }}>
           {g.warning}
@@ -214,6 +293,11 @@ export function FixturesScreen() {
       sb: result?.sb ?? live?.sb ?? undefined,
       win: result?.win ?? undefined,
       pens: result?.pens ?? undefined,
+      minute: live?.minute ?? undefined,
+      extra: live?.extra ?? undefined,
+      statusShort: live?.statusShort ?? undefined,
+      statusLong: live?.statusLong ?? undefined,
+      events: live?.events?.length ? live.events : fixture.events,
       status: result ? "finished" : live ? "live" : fixture.status,
     };
   }), [fixtures, liveById, resultById]);
@@ -233,12 +317,12 @@ export function FixturesScreen() {
   };
 
   const grouped = allGames.reduce<Record<string, Game[]>>((acc, game) => {
-    (acc[game.date] ??= []).push(game);
+    (acc[localDateKey(game)] ??= []).push(game);
     return acc;
   }, {});
   const days = Object.entries(grouped)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, games]) => ({ key: date, ...dayLabel(date), games: games.filter(matches) }))
+    .map(([date, games]) => ({ key: date, ...dayLabel(games[0]), games: games.filter(matches) }))
     .filter((d) => d.games.length);
 
   return (

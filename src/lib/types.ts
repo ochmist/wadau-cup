@@ -31,6 +31,48 @@ export type ResultPointDoc = {
   points: number;
 };
 
+export type MatchEventDoc = {
+  id: string;
+  team: string | null;
+  teamName: string;
+  minute: number | null;
+  extra: number | null;
+  player: string | null;
+  assist: string | null;
+  type: "goal" | "card" | "substitution" | "var" | "other";
+  detail: string | null;
+  comments?: string | null;
+};
+
+export type TeamSquadPlayerDoc = {
+  id: string;
+  name: string;
+  age: number | null;
+  number: number | null;
+  position: string | null;
+  photo: string | null;
+};
+
+export type TeamCoachDoc = {
+  id: string;
+  name: string;
+  nationality: string | null;
+  photo: string | null;
+};
+
+export type TeamProfileDoc = {
+  code: string;
+  name: string;
+  flag: string;
+  tier: Tier;
+  group: string | null;
+  providerTeamId: string | null;
+  logo: string | null;
+  coach: TeamCoachDoc | null;
+  players: TeamSquadPlayerDoc[];
+  updatedAt?: Timestamp;
+};
+
 export type PlayerDoc = {
   name: string;
   short: string; // 2-char display initials
@@ -91,6 +133,7 @@ export type FixtureDoc = {
   sourceIds: Partial<Record<"footballData" | "apiFootball" | "openfootball", string>>;
   lastSyncedAt?: Timestamp;
   warning?: string | null;
+  events?: MatchEventDoc[];
 };
 
 // ── Firestore: pools/{poolId}/liveState/{matchId} ─────────────────────────
@@ -98,10 +141,14 @@ export type LiveStateDoc = {
   id: string;
   fixtureId: string;
   status: "live" | "paused" | "finished" | "unknown";
+  statusShort?: string | null;
+  statusLong?: string | null;
   minute: number | null;
+  extra?: number | null;
   sa: number | null;
   sb: number | null;
   source: "api-football" | "football-data";
+  events?: MatchEventDoc[];
   updatedAt: Timestamp;
 };
 
@@ -121,6 +168,8 @@ export type SyncStatusDoc = {
   warnings?: SyncWarning[];
   fixtureCount?: number;
   liveCount?: number;
+  teamProfileCount?: number;
+  clearedFixtureCount?: number;
   clearedLiveCount?: number;
   lockedResultCount?: number;
   skippedManualCount?: number;

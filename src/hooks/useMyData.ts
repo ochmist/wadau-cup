@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { subscribePlayer } from "@/lib/firestore";
 import { useAuth } from "@/lib/auth";
 import type { PlayerDoc } from "@/lib/types";
-import { draftRemainingByTier, me as mockMe, WADAU } from "@/lib/data";
+import { compareTeamsByGroup, draftRemainingByTier, me as mockMe, WADAU } from "@/lib/data";
 import type { Tier } from "@/lib/data";
 
 const FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
@@ -76,5 +76,5 @@ export function enrichPlayerTeams(player: PlayerDoc | null) {
       rem: entry.rem || (entry.alive ? draftRemainingByTier[tier as Tier] ?? 0 : 0),
       alive: entry.alive,
     };
-  });
+  }).sort(compareTeamsByGroup);
 }
