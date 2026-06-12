@@ -198,8 +198,8 @@ async function seedSampleResults() {
   console.log("\n⚽ Seeding sample match results (R16 — 2 entered)…");
   // pts stored as objects (Firestore doesn't allow arrays-of-arrays)
   const results = [
-    { id: "m49", round: "Round of 16", a: "FRA", b: "COD", sa: 3, sb: 0, win: "FRA", pts: [{ code:"FRA", tier:"A", v:1 }], held: 2, note: "France stroll into the Quarters.", pens: null },
-    { id: "m50", round: "Round of 16", a: "ARG", b: "NOR", sa: 2, sb: 1, win: "ARG", pts: [{ code:"ARG", tier:"A", v:1 }], held: 1, note: "Late winner sends Argentina through.", pens: null },
+    { id: "m49", round: "Round of 16", a: "FRA", b: "COD", sa: 3, sb: 0, win: "FRA", pts: [{ code:"FRA", tier:"A", points:1 }], held: 2, note: "France stroll into the Quarters.", pens: null },
+    { id: "m50", round: "Round of 16", a: "ARG", b: "NOR", sa: 2, sb: 1, win: "ARG", pts: [{ code:"ARG", tier:"A", points:1 }], held: 1, note: "Late winner sends Argentina through.", pens: null },
   ];
   for (const r of results) {
     const { id, ...data } = r;

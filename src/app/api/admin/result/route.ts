@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
+    console.error("[admin/result]", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }

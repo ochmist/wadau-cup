@@ -14,6 +14,7 @@ const EXTRA_ALIASES: Record<string, string> = {
   "bosnia and herzegovina": "BIH",
   "cape verde": "CPV",
   "cabo verde": "CPV",
+  "cape verde islands": "CPV",
   "congo dr": "COD",
   "congo d r": "COD",
   "dr congo": "COD",
@@ -21,6 +22,7 @@ const EXTRA_ALIASES: Record<string, string> = {
   "cote divoire": "CIV",
   "cote d ivoire": "CIV",
   "côte d’ivoire": "CIV",
+  "ivory coast": "CIV",
   "curacao": "CUW",
   "curaçao": "CUW",
   "czech republic": "CZE",
@@ -97,4 +99,3 @@ export function teamLabel(team: ProviderTeam | string | null | undefined) {
   if (typeof team === "string") return team;
   return team.name ?? team.shortName ?? team.tla ?? team.code ?? "TBD";
 }
-

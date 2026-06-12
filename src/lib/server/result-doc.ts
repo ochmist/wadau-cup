@@ -48,15 +48,15 @@ export function buildResultDoc(input: {
   manualOverride?: boolean;
   providerMatchId?: string;
 }): Omit<ResultDoc, "enteredAt"> {
-  const awarded: [string, Tier, number][] = [];
+  const awarded: ResultDoc["pts"] = [];
   if (input.win === "draw") {
     for (const code of [input.a, input.b]) {
       const tier = T[code]?.t;
-      if (tier) awarded.push([code, tier, pointsFor(input.round, "draw", tier)]);
+      if (tier) awarded.push({ code, tier, points: pointsFor(input.round, "draw", tier) });
     }
   } else if (input.win) {
     const tier = T[input.win]?.t;
-    if (tier) awarded.push([input.win, tier, pointsFor(input.round, "win", tier)]);
+    if (tier) awarded.push({ code: input.win, tier, points: pointsFor(input.round, "win", tier) });
   }
 
   const held = input.win && input.win !== "draw" && input.players

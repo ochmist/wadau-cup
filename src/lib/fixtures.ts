@@ -14,7 +14,7 @@ export type FixtureGame = {
   label: string;
   venue?: string | null;
   status?: "scheduled" | "live" | "finished" | "postponed" | "abandoned" | "unknown";
-  source?: "football-data" | "openfootball" | "temporary";
+  source?: "football-data" | "api-football" | "openfootball" | "temporary";
   warning?: string | null;
 };
 

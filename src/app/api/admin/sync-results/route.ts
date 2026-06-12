@@ -57,6 +57,15 @@ function hasLiveWindow(fixtures: FixtureDoc[], now = Date.now()) {
   });
 }
 
+function hasUnrecordedPastFixture(fixtures: FixtureDoc[], resultIds: Set<string>, now = Date.now()) {
+  return fixtures.some((fixture) => {
+    if (resultIds.has(fixture.id)) return false;
+    const kickoff = Date.parse(fixture.kickoffAt);
+    if (Number.isNaN(kickoff)) return false;
+    return now > kickoff + 120 * 60 * 1000;
+  });
+}
+
 export async function POST(req: NextRequest) {
   if (!adminDb) {
     return NextResponse.json({ error: "Admin SDK not configured" }, { status: 503 });
@@ -68,22 +77,30 @@ export async function POST(req: NextRequest) {
 
   try {
     const statusRef = adminDb.doc(`pools/${POOL_ID}/sync/status`);
-    const [statusSnap, existingFixturesSnap] = await Promise.all([
+    const [statusSnap, existingFixturesSnap, existingResultsSnap, existingLiveSnap] = await Promise.all([
       statusRef.get(),
       adminDb.collection(`pools/${POOL_ID}/fixtures`).get(),
+      adminDb.collection(`pools/${POOL_ID}/results`).get(),
+      adminDb.collection(`pools/${POOL_ID}/liveState`).get(),
     ]);
     const cachedFixtures = existingFixturesSnap.docs.map((doc) => ({ ...(doc.data() as FixtureDoc), id: doc.id }));
+    const existingResults = new Map(
+      existingResultsSnap.docs.map((doc) => [doc.id, { ...(doc.data() as ResultDoc), id: doc.id }]),
+    );
+    const existingResultIds = new Set(existingResults.keys());
     const lastFixtureSyncMs = timestampMillis(statusSnap.get("syncedAt"));
     const force = req.nextUrl.searchParams.get("force") === "1";
     const needsDailyFixtureRefresh = !lastFixtureSyncMs || Date.now() - lastFixtureSyncMs > 24 * 60 * 60 * 1000;
     const liveWindowOpen = hasLiveWindow(cachedFixtures);
+    const needsResultCatchup = hasUnrecordedPastFixture(cachedFixtures, existingResultIds);
 
-    if (!force && cachedFixtures.length > 0 && !needsDailyFixtureRefresh && !liveWindowOpen) {
+    if (!force && cachedFixtures.length > 0 && !needsDailyFixtureRefresh && !liveWindowOpen && !needsResultCatchup) {
       return NextResponse.json({
         ok: true,
         skipped: true,
         reason: "No match is inside a live polling window and fixtures were refreshed in the last 24 hours.",
         fixtureCount: cachedFixtures.length,
+        needsResultCatchup,
       });
     }
 
@@ -91,24 +108,26 @@ export async function POST(req: NextRequest) {
     const quotaSnap = await quotaRef.get();
     const apiFootballCalls = Number(quotaSnap.get("calls") ?? 0);
     const apiFootballConfigured = Boolean(matchDataConfig.enableLiveLayer && matchDataConfig.apiFootballApiKey);
-    const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls < matchDataConfig.apiFootballDailyCap;
+    const useApiFootballFixtures = force || needsDailyFixtureRefresh || needsResultCatchup;
+    const apiFootballCallsThisSync = useApiFootballFixtures ? 2 : 1;
+    const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls + apiFootballCallsThisSync <= matchDataConfig.apiFootballDailyCap;
 
-    const [adapterState, playersSnap, existingResultsSnap] = await Promise.all([
-      getMatchAdapterState({ enableApiFootball: apiFootballAllowed }),
+    const [adapterState, playersSnap] = await Promise.all([
+      getMatchAdapterState({
+        enableApiFootball: apiFootballAllowed,
+        enableApiFootballFixtures: useApiFootballFixtures,
+      }),
       adminDb.collection(`pools/${POOL_ID}/players`).get(),
-      adminDb.collection(`pools/${POOL_ID}/results`).get(),
     ]);
 
     const players = playersSnap.docs.map((doc) => doc.data() as PlayerDoc);
-    const existingResults = new Map(
-      existingResultsSnap.docs.map((doc) => [doc.id, { ...(doc.data() as ResultDoc), id: doc.id }]),
-    );
 
     const batch = adminDb.batch();
     let fixtureCount = 0;
     let liveCount = 0;
     let lockedResultCount = 0;
     let skippedManualCount = 0;
+    let clearedLiveCount = 0;
 
     for (const fixture of adapterState.fixtures) {
       const { result: _result, liveState: _liveState, ...fixtureDoc } = fixture;
@@ -162,6 +181,12 @@ export async function POST(req: NextRequest) {
       );
       liveCount += 1;
     }
+    const nextLiveIds = new Set(adapterState.liveState.map((live) => live.fixtureId));
+    for (const liveDoc of existingLiveSnap.docs) {
+      if (nextLiveIds.has(liveDoc.id)) continue;
+      batch.delete(liveDoc.ref);
+      clearedLiveCount += 1;
+    }
 
     batch.set(
       adminDb.doc(`pools/${POOL_ID}/sync/status`),
@@ -170,6 +195,7 @@ export async function POST(req: NextRequest) {
         warnings: adapterState.warnings,
         fixtureCount,
         liveCount,
+        clearedLiveCount,
         lockedResultCount,
         skippedManualCount,
         syncedAt: FieldValue.serverTimestamp(),
@@ -182,7 +208,7 @@ export async function POST(req: NextRequest) {
         quotaRef,
         {
           date: quotaDateKey(),
-          calls: FieldValue.increment(1),
+          calls: FieldValue.increment(apiFootballCallsThisSync),
           cap: matchDataConfig.apiFootballDailyCap,
           updatedAt: FieldValue.serverTimestamp(),
         },
@@ -197,6 +223,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       fixtureCount,
       liveCount,
+      clearedLiveCount,
       lockedResultCount,
       skippedManualCount,
       warningCount: adapterState.warnings.length,
@@ -204,11 +231,13 @@ export async function POST(req: NextRequest) {
         configured: apiFootballConfigured,
         allowed: apiFootballAllowed,
         callsBeforeSync: apiFootballCalls,
+        callsThisSync: apiFootballConfigured && apiFootballAllowed ? apiFootballCallsThisSync : 0,
         cap: matchDataConfig.apiFootballDailyCap,
       },
       recompute,
     });
   } catch (error) {
+    console.error("[sync-results]", error);
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

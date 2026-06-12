@@ -48,6 +48,10 @@ function scoringLabel(result: ResultWithId, teamCode: string) {
   return "Win";
 }
 
+function scoringPathLabel(result: ResultWithId, teamCode: string, tier: Tier) {
+  return `Tier ${tier} · ${result.round} · ${scoringLabel(result, teamCode)}`;
+}
+
 type PointEventTuple = [string, Tier, number];
 
 function pointEventTuple(value: unknown): PointEventTuple | null {
@@ -62,7 +66,7 @@ function pointEventTuple(value: unknown): PointEventTuple | null {
     const row = value as Record<string, unknown>;
     const code = row.code ?? row.team ?? row.teamCode;
     const tier = row.tier;
-    const points = row.points ?? row.pts ?? row.value;
+    const points = row.points ?? row.pts ?? row.value ?? row.v;
     return typeof code === "string" && typeof tier === "string" && typeof points === "number"
       ? [code, tier as Tier, points]
       : null;
@@ -79,13 +83,13 @@ function teamPointEvents(team: PlayerTeam, results: ResultWithId[]) {
         .map(pointEventTuple)
         .filter((entry): entry is PointEventTuple => Boolean(entry))
         .filter(([code, tier, points]) => code === team.code && tier === team.tier && points > 0);
-      return matches.map(([, , points]) => {
+      return matches.map(([, tier, points]) => {
         const opponentCode = result.a === team.code ? result.b : result.a;
         const opponent = T[opponentCode];
         return {
           id: result.id,
           round: result.round,
-          label: scoringLabel(result, team.code),
+          label: scoringPathLabel(result, team.code, tier),
           opponentName: opponent?.n ?? opponentCode,
           opponentFlag: opponent?.f ?? "🏳",
           score: resultScore(result),
@@ -95,7 +99,7 @@ function teamPointEvents(team: PlayerTeam, results: ResultWithId[]) {
     });
 }
 
-function PointsBreakdown({
+function PointsPath({
   player,
   results,
   loading,
@@ -115,19 +119,16 @@ function PointsBreakdown({
   return (
     <div className="wc-card" style={{ padding: "16px 16px" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-        <SectionLabel>Points explained</SectionLabel>
+        <SectionLabel>Points path</SectionLabel>
         <span className="wc-num" style={{ fontSize: 12.5, color: "var(--dim)", whiteSpace: "nowrap" }}>
-          {explainedTotal} of {player.points} pts
+          {explainedTotal} / {player.points} pts
         </span>
-      </div>
-      <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 8, lineHeight: 1.45 }}>
-        Player points are the sum of points earned by each drafted team from completed match results.
       </div>
       {loading ? (
         <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>Loading scoring events…</div>
       ) : !hasEvents ? (
         <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>
-          No scoring events yet. This will fill in as match results are locked.
+          No locked scoring events yet.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
@@ -144,7 +145,7 @@ function PointsBreakdown({
                   <div className="wc-eyebrow" style={{ marginTop: 2 }}>Tier {team.tier}</div>
                 </div>
                 <div className="wc-num" style={{ fontSize: 15, fontWeight: 700 }}>
-                  {team.pts}<span className="wc-eyebrow" style={{ marginLeft: 3 }}>pts</span>
+                  {explained}<span className="wc-eyebrow" style={{ marginLeft: 3 }}>pts</span>
                 </div>
               </div>
               {events.length ? (
@@ -162,7 +163,7 @@ function PointsBreakdown({
                     >
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 650 }}>
-                          {event.round} · {event.label}
+                          {event.label}
                         </div>
                         <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           vs {event.opponentFlag} {event.opponentName}{event.score ? ` · ${event.score}` : ""}
@@ -181,7 +182,7 @@ function PointsBreakdown({
               )}
               {explained !== team.pts && (
                 <div style={{ padding: "8px 12px", fontSize: 11.5, color: "var(--gold)", borderTop: "1px solid var(--line)" }}>
-                  Current team total is {team.pts}; visible locked-result events explain {explained}.
+                  Standing total is {team.pts}; path currently shows {explained}.
                 </div>
               )}
             </div>
@@ -653,7 +654,7 @@ export function PlayerScreen({ name }: { name: string }) {
             <div className="wc-eyebrow" aria-hidden style={{ visibility: "hidden", marginBottom: 8 }}>·</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {canViewPicks && Ceiling}{Gap}{canViewPicks && Tie}
-              {canViewPicks && <PointsBreakdown player={p} results={results} loading={resultsLoading} />}
+              {canViewPicks && <PointsPath player={p} results={results} loading={resultsLoading} />}
             </div>
           </div>
         </div>
@@ -677,7 +678,7 @@ export function PlayerScreen({ name }: { name: string }) {
             </div>
             <div style={{ marginTop: 18 }}>{Tie}</div>
             <div style={{ marginTop: 18 }}>
-              <PointsBreakdown player={p} results={results} loading={resultsLoading} />
+              <PointsPath player={p} results={results} loading={resultsLoading} />
             </div>
           </>
         ) : (

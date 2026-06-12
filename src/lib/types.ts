@@ -25,6 +25,12 @@ export type PickEntry = {
   alive: boolean;
 };
 
+export type ResultPointDoc = {
+  code: string;
+  tier: Tier;
+  points: number;
+};
+
 export type PlayerDoc = {
   name: string;
   short: string; // 2-char display initials
@@ -56,13 +62,13 @@ export type ResultDoc = {
   sb: number | null;
   win: string | null; // winning team code or "draw"
   pens: string | null;
-  pts: [string, Tier, number][]; // [teamCode, tier, pointsAwarded]
+  pts: ResultPointDoc[]; // Firestore-safe point rows for each team awarded points.
   held: number; // how many players hold the winning team
   note: string;
   enteredAt: Timestamp;
   locked?: boolean;
   manualOverride?: boolean;
-  source?: "manual" | "football-data" | "openfootball";
+  source?: "manual" | "football-data" | "api-football" | "openfootball";
   providerMatchId?: string;
 };
 
@@ -81,7 +87,7 @@ export type FixtureDoc = {
   b: string | null;
   aName: string;
   bName: string;
-  source: "football-data" | "openfootball" | "temporary";
+  source: "football-data" | "api-football" | "openfootball" | "temporary";
   sourceIds: Partial<Record<"footballData" | "apiFootball" | "openfootball", string>>;
   lastSyncedAt?: Timestamp;
   warning?: string | null;
@@ -115,6 +121,7 @@ export type SyncStatusDoc = {
   warnings?: SyncWarning[];
   fixtureCount?: number;
   liveCount?: number;
+  clearedLiveCount?: number;
   lockedResultCount?: number;
   skippedManualCount?: number;
   syncedAt?: Timestamp;
