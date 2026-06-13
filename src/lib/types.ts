@@ -44,6 +44,30 @@ export type MatchEventDoc = {
   comments?: string | null;
 };
 
+export type MatchLineupPlayerDoc = {
+  id: string;
+  name: string;
+  number: number | null;
+  position: string | null;
+  grid: string | null;
+};
+
+export type MatchLineupTeamDoc = {
+  team: string | null;
+  teamName: string;
+  formation: string | null;
+  coach: string | null;
+  startXI: MatchLineupPlayerDoc[];
+  substitutes: MatchLineupPlayerDoc[];
+};
+
+export type MatchStatisticDoc = {
+  team: string | null;
+  teamName: string;
+  type: string;
+  value: string | number | null;
+};
+
 export type TeamSquadPlayerDoc = {
   id: string;
   name: string;
@@ -134,6 +158,8 @@ export type FixtureDoc = {
   lastSyncedAt?: Timestamp;
   warning?: string | null;
   events?: MatchEventDoc[];
+  lineups?: MatchLineupTeamDoc[];
+  statistics?: MatchStatisticDoc[];
 };
 
 // ── Firestore: pools/{poolId}/liveState/{matchId} ─────────────────────────
@@ -149,6 +175,8 @@ export type LiveStateDoc = {
   sb: number | null;
   source: "api-football" | "football-data";
   events?: MatchEventDoc[];
+  lineups?: MatchLineupTeamDoc[];
+  statistics?: MatchStatisticDoc[];
   updatedAt: Timestamp;
 };
 

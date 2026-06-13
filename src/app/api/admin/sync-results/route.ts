@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
     const apiFootballCalls = Number(quotaSnap.get("calls") ?? 0);
     const apiFootballConfigured = Boolean(matchDataConfig.enableLiveLayer && matchDataConfig.apiFootballApiKey);
     const useApiFootballFixtures = force || needsDailyFixtureRefresh || needsResultCatchup;
-    const estimatedApiFootballCalls = useApiFootballFixtures ? 160 : 12;
+    const estimatedApiFootballCalls = useApiFootballFixtures ? 800 : 60;
     const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls + estimatedApiFootballCalls <= matchDataConfig.apiFootballDailyCap;
 
     const [adapterState, playersSnap] = await Promise.all([

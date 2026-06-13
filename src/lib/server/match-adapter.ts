@@ -2,7 +2,7 @@ import { matchDataConfig } from "@/lib/config";
 import { GROUPS, T } from "@/lib/data";
 import { TEMP_FIXTURES, type FixtureGame } from "@/lib/fixtures";
 import { canonicalTeamId, isPlaceholderTeam, teamLabel, type ProviderTeam } from "@/lib/team-aliases";
-import type { MatchEventDoc, TeamProfileDoc } from "@/lib/types";
+import type { MatchEventDoc, MatchLineupTeamDoc, MatchStatisticDoc, TeamProfileDoc } from "@/lib/types";
 
 export type NormalizedStatus = "scheduled" | "live" | "finished" | "postponed" | "abandoned" | "unknown";
 
@@ -15,6 +15,8 @@ export type NormalizedFixture = FixtureGame & {
   sourceIds: Partial<Record<"footballData" | "apiFootball" | "openfootball", string>>;
   warning?: string | null;
   events?: MatchEventDoc[];
+  lineups?: MatchLineupTeamDoc[];
+  statistics?: MatchStatisticDoc[];
   result?: NormalizedResult | null;
   liveState?: NormalizedLiveState | null;
 };
@@ -43,6 +45,8 @@ export type NormalizedLiveState = {
   sb: number | null;
   source: "api-football" | "football-data";
   events?: MatchEventDoc[];
+  lineups?: MatchLineupTeamDoc[];
+  statistics?: MatchStatisticDoc[];
 };
 
 export type AdapterWarning = {
@@ -129,6 +133,47 @@ type ApiFootballEvent = {
   type?: string | null;
   detail?: string | null;
   comments?: string | null;
+};
+
+type ApiFootballLineup = {
+  team?: ProviderTeam & { logo?: string | null };
+  coach?: {
+    id?: number | null;
+    name?: string | null;
+  };
+  formation?: string | null;
+  startXI?: {
+    player?: {
+      id?: number | null;
+      name?: string | null;
+      number?: number | null;
+      pos?: string | null;
+      grid?: string | null;
+    };
+  }[];
+  substitutes?: {
+    player?: {
+      id?: number | null;
+      name?: string | null;
+      number?: number | null;
+      pos?: string | null;
+      grid?: string | null;
+    };
+  }[];
+};
+
+type ApiFootballStatistic = {
+  team?: ProviderTeam & { logo?: string | null };
+  statistics?: {
+    type?: string | null;
+    value?: string | number | null;
+  }[];
+};
+
+type ApiFootballProceedings = {
+  events: MatchEventDoc[];
+  lineups: MatchLineupTeamDoc[];
+  statistics: MatchStatisticDoc[];
 };
 
 type ApiFootballSquad = {
@@ -358,8 +403,41 @@ function normalizeApiFootballEvents(events: ApiFootballEvent[]): MatchEventDoc[]
   }));
 }
 
-function scorerEvents(events: MatchEventDoc[]) {
-  return events.filter((event) => event.type === "goal");
+function normalizeLineupPlayer(input: NonNullable<ApiFootballLineup["startXI"]>[number], fallbackIndex: number) {
+  const player = input.player;
+  return {
+    id: player?.id == null ? `${player?.name ?? "player"}-${fallbackIndex}` : String(player.id),
+    name: player?.name ?? "Unknown player",
+    number: scoreNumber(player?.number),
+    position: player?.pos ?? null,
+    grid: player?.grid ?? null,
+  };
+}
+
+function normalizeApiFootballLineups(lineups: ApiFootballLineup[]): MatchLineupTeamDoc[] {
+  return lineups.map((lineup) => ({
+    team: canonicalTeamId(lineup.team),
+    teamName: teamLabel(lineup.team),
+    formation: lineup.formation ?? null,
+    coach: lineup.coach?.name ?? null,
+    startXI: (lineup.startXI ?? []).map(normalizeLineupPlayer),
+    substitutes: (lineup.substitutes ?? []).map(normalizeLineupPlayer),
+  }));
+}
+
+function normalizeApiFootballStatistics(rows: ApiFootballStatistic[]): MatchStatisticDoc[] {
+  return rows.flatMap((row) => {
+    const team = canonicalTeamId(row.team);
+    const teamName = teamLabel(row.team);
+    return (row.statistics ?? [])
+      .filter((stat) => stat.type)
+      .map((stat) => ({
+        team,
+        teamName,
+        type: stat.type ?? "Unknown",
+        value: stat.value ?? null,
+      }));
+  });
 }
 
 function apiFootballTeamRefs(fixtures: ApiFootballFixture[]) {
@@ -380,15 +458,50 @@ function apiFootballTeamRefs(fixtures: ApiFootballFixture[]) {
   return Array.from(refs.values());
 }
 
-async function fetchApiFootballEvents(fixtureId: string): Promise<{ events: MatchEventDoc[]; warnings: AdapterWarning[]; calls: number }> {
+async function fetchApiFootballProceedings(fixtureId: string): Promise<{
+  events: MatchEventDoc[];
+  lineups: MatchLineupTeamDoc[];
+  statistics: MatchStatisticDoc[];
+  warnings: AdapterWarning[];
+  calls: number;
+}> {
+  const headers = { "x-apisports-key": matchDataConfig.apiFootballApiKey };
   const qs = new URLSearchParams({ fixture: fixtureId });
-  const data = await fetchJson(`${matchDataConfig.apiFootballBaseUrl}/fixtures/events?${qs}`, {
-    headers: { "x-apisports-key": matchDataConfig.apiFootballApiKey },
-  }) as { response?: ApiFootballEvent[]; errors?: unknown };
+  const [eventResult, lineupResult, statisticsResult] = await Promise.allSettled([
+    fetchJson(`${matchDataConfig.apiFootballBaseUrl}/fixtures/events?${qs}`, { headers }) as Promise<{ response?: ApiFootballEvent[]; errors?: unknown }>,
+    fetchJson(`${matchDataConfig.apiFootballBaseUrl}/fixtures/lineups?${qs}`, { headers }) as Promise<{ response?: ApiFootballLineup[]; errors?: unknown }>,
+    fetchJson(`${matchDataConfig.apiFootballBaseUrl}/fixtures/statistics?${qs}`, { headers }) as Promise<{ response?: ApiFootballStatistic[]; errors?: unknown }>,
+  ]);
   const warnings: AdapterWarning[] = [];
-  const providerError = providerErrorMessage(data.errors);
-  if (providerError) warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: providerError });
-  return { events: normalizeApiFootballEvents(data.response ?? []), warnings, calls: 1 };
+  let events: MatchEventDoc[] = [];
+  let lineups: MatchLineupTeamDoc[] = [];
+  let statistics: MatchStatisticDoc[] = [];
+
+  if (eventResult.status === "fulfilled") {
+    const providerError = providerErrorMessage(eventResult.value.errors);
+    if (providerError) warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: providerError });
+    events = normalizeApiFootballEvents(eventResult.value.response ?? []);
+  } else {
+    warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: `Events fetch failed: ${eventResult.reason instanceof Error ? eventResult.reason.message : String(eventResult.reason)}` });
+  }
+
+  if (lineupResult.status === "fulfilled") {
+    const providerError = providerErrorMessage(lineupResult.value.errors);
+    if (providerError) warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: providerError });
+    lineups = normalizeApiFootballLineups(lineupResult.value.response ?? []);
+  } else {
+    warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: `Lineups fetch failed: ${lineupResult.reason instanceof Error ? lineupResult.reason.message : String(lineupResult.reason)}` });
+  }
+
+  if (statisticsResult.status === "fulfilled") {
+    const providerError = providerErrorMessage(statisticsResult.value.errors);
+    if (providerError) warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: providerError });
+    statistics = normalizeApiFootballStatistics(statisticsResult.value.response ?? []);
+  } else {
+    warnings.push({ provider: "api-football", matchId: `af-${fixtureId}`, message: `Statistics fetch failed: ${statisticsResult.reason instanceof Error ? statisticsResult.reason.message : String(statisticsResult.reason)}` });
+  }
+
+  return { events, lineups, statistics, warnings, calls: 3 };
 }
 
 async function fetchApiFootballTeamProfile(input: {
@@ -579,7 +692,7 @@ function roundFromApiFootball(value?: string | null) {
   return value ?? "Unknown";
 }
 
-function liveStateFromApiFootball(row: ApiFootballFixture, fixtureId: string, events: MatchEventDoc[] = []): NormalizedLiveState | null {
+function liveStateFromApiFootball(row: ApiFootballFixture, fixtureId: string, proceedings: Partial<ApiFootballProceedings> = {}): NormalizedLiveState | null {
   const status = apiFootballStatus(row.fixture?.status?.short);
   if (status !== "live" && status !== "paused") return null;
   return {
@@ -592,7 +705,9 @@ function liveStateFromApiFootball(row: ApiFootballFixture, fixtureId: string, ev
     sa: scoreNumber(row.goals?.home),
     sb: scoreNumber(row.goals?.away),
     source: "api-football",
-    events: scorerEvents(events),
+    events: proceedings.events ?? [],
+    lineups: proceedings.lineups ?? [],
+    statistics: proceedings.statistics ?? [],
   };
 }
 
@@ -650,15 +765,15 @@ async function fetchApiFootballFixtures(options: { includeTeamProfiles?: boolean
     const { date, time } = datePartsFromIso(kickoffAt);
     const warning = !home || !away ? unresolvedTeamWarning(row.teams?.home, row.teams?.away) : null;
     if (warning) warnings.push({ matchId: id, provider: "api-football", message: warning });
-    let events: MatchEventDoc[] = [];
+    let proceedings: ApiFootballProceedings = { events: [], lineups: [], statistics: [] };
     if (["live", "finished"].includes(statusFromApiFootball(row.fixture?.status?.short)) && row.fixture?.id != null) {
       try {
-        const eventResult = await fetchApiFootballEvents(apiId);
-        events = scorerEvents(eventResult.events);
-        calls += eventResult.calls;
-        warnings.push(...eventResult.warnings);
+        const result = await fetchApiFootballProceedings(apiId);
+        proceedings = { events: result.events, lineups: result.lineups, statistics: result.statistics };
+        calls += result.calls;
+        warnings.push(...result.warnings);
       } catch (error) {
-        warnings.push({ matchId: id, provider: "api-football", message: `Events fetch failed: ${(error as Error).message}` });
+        warnings.push({ matchId: id, provider: "api-football", message: `Proceedings fetch failed: ${(error as Error).message}` });
       }
     }
     fixtures.push({
@@ -678,9 +793,11 @@ async function fetchApiFootballFixtures(options: { includeTeamProfiles?: boolean
       source: "api-football" as const,
       sourceIds: { apiFootball: apiId },
       warning,
-      events,
+      events: proceedings.events,
+      lineups: proceedings.lineups,
+      statistics: proceedings.statistics,
       result: resultFromApiFootball(row, id, round, home, away),
-      liveState: liveStateFromApiFootball(row, id, events),
+      liveState: liveStateFromApiFootball(row, id, proceedings),
     });
   }
 
@@ -718,6 +835,8 @@ function mergeApiFootballFixtures(primary: NormalizedFixture[], apiFixtures: Nor
       result: fixture.result ?? apiFixture.result,
       liveState: apiFixture.liveState ?? fixture.liveState,
       events: apiFixture.events?.length ? apiFixture.events : fixture.events,
+      lineups: apiFixture.lineups?.length ? apiFixture.lineups : fixture.lineups,
+      statistics: apiFixture.statistics?.length ? apiFixture.statistics : fixture.statistics,
       venue: fixture.venue ?? apiFixture.venue,
     };
   });
@@ -776,15 +895,15 @@ async function fetchApiFootballLive(fixtures: NormalizedFixture[]): Promise<{ li
       });
       continue;
     }
-    let events: MatchEventDoc[] = [];
+    let proceedings: ApiFootballProceedings = { events: [], lineups: [], statistics: [] };
     if (apiId) {
       try {
-        const eventResult = await fetchApiFootballEvents(apiId);
-        events = scorerEvents(eventResult.events);
-        calls += eventResult.calls;
-        warnings.push(...eventResult.warnings);
+        const result = await fetchApiFootballProceedings(apiId);
+        proceedings = { events: result.events, lineups: result.lineups, statistics: result.statistics };
+        calls += result.calls;
+        warnings.push(...result.warnings);
       } catch (error) {
-        warnings.push({ provider: "api-football", matchId: fixture.id, message: `Live events fetch failed: ${(error as Error).message}` });
+        warnings.push({ provider: "api-football", matchId: fixture.id, message: `Live proceedings fetch failed: ${(error as Error).message}` });
       }
     }
     liveState.push({
@@ -797,7 +916,9 @@ async function fetchApiFootballLive(fixtures: NormalizedFixture[]): Promise<{ li
       sa: scoreNumber(row.goals?.home),
       sb: scoreNumber(row.goals?.away),
       source: "api-football",
-      events,
+      events: proceedings.events,
+      lineups: proceedings.lineups,
+      statistics: proceedings.statistics,
     });
   }
   return { liveState, warnings, calls };

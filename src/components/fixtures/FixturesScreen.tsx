@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
 import { useFixtures } from "@/hooks/useFixtures";
-import type { MatchEventDoc } from "@/lib/types";
+import type { MatchEventDoc, MatchLineupTeamDoc, MatchStatisticDoc } from "@/lib/types";
 
 type Game = {
   id: string;
@@ -34,6 +34,8 @@ type Game = {
   statusShort?: string | null;
   statusLong?: string | null;
   events?: MatchEventDoc[];
+  lineups?: MatchLineupTeamDoc[];
+  statistics?: MatchStatisticDoc[];
   // present only on completed matches
   sa?: number;
   sb?: number;
@@ -167,7 +169,7 @@ function ScorerLine({ label, events, align }: { label: string; events: MatchEven
   );
 }
 
-function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
+function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; onOpen: () => void }) {
   const aMine = Boolean(g.a && mineCodes.includes(g.a));
   const bMine = Boolean(g.b && mineCodes.includes(g.b));
   const played = isFinal(g);
@@ -179,14 +181,23 @@ function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
   const bScorers = teamScorers(g.events, g.b);
 
   return (
-    <div
+    <button
+      type="button"
       className="wc-card"
+      onClick={onOpen}
       style={{
+        width: "100%",
+        appearance: "none",
+        display: "block",
+        font: "inherit",
+        color: "var(--text)",
+        textAlign: "left",
         padding: "13px 16px",
         border: "1px solid " + (aMine || bMine ? "var(--lime-line)" : "var(--line)"),
         // completed ties recede so upcoming matches lead the eye (esp. in "All")
         background: played ? "var(--surface-2)" : "var(--surface)",
         opacity: played ? 0.6 : 1,
+        cursor: "pointer",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -249,6 +260,198 @@ function FixtureCard({ g, mineCodes }: { g: Game; mineCodes: string[] }) {
           {g.warning}
         </div>
       )}
+    </button>
+  );
+}
+
+function eventLabel(event: MatchEventDoc) {
+  if (event.type === "goal") return event.detail?.toLowerCase().includes("own") ? "Own goal" : "Goal";
+  if (event.type === "substitution") return "Substitution";
+  if (event.type === "card") return event.detail ?? "Card";
+  if (event.type === "var") return "VAR";
+  return event.detail ?? "Event";
+}
+
+function eventText(event: MatchEventDoc) {
+  if (event.type === "goal") {
+    return [event.player, event.assist ? `assist ${event.assist}` : null].filter(Boolean).join(" · ");
+  }
+  if (event.type === "substitution") {
+    if (event.player && event.assist) return `${event.assist} for ${event.player}`;
+    return event.player ?? event.assist ?? "";
+  }
+  return [event.player, event.comments].filter(Boolean).join(" · ");
+}
+
+function valueLabel(value: MatchStatisticDoc["value"]) {
+  if (value == null || value === "") return "-";
+  return String(value);
+}
+
+function statsRows(g: Game) {
+  const byType = new Map<string, { a: MatchStatisticDoc["value"]; b: MatchStatisticDoc["value"] }>();
+  for (const stat of g.statistics ?? []) {
+    const row = byType.get(stat.type) ?? { a: null, b: null };
+    if (stat.team === g.a || (!stat.team && stat.teamName === g.aName)) row.a = stat.value;
+    if (stat.team === g.b || (!stat.team && stat.teamName === g.bName)) row.b = stat.value;
+    byType.set(stat.type, row);
+  }
+  return Array.from(byType.entries()).filter(([, row]) => row.a != null || row.b != null);
+}
+
+function LineupColumn({ lineup }: { lineup: MatchLineupTeamDoc }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+        <strong style={{ fontSize: 14 }}>{lineup.teamName}</strong>
+        {lineup.formation && <span className="wc-pill" style={{ padding: "2px 8px", fontSize: 9 }}>{lineup.formation}</span>}
+      </div>
+      {lineup.coach && <div style={{ color: "var(--dim)", fontSize: 12, marginBottom: 10 }}>Coach: {lineup.coach}</div>}
+      <div className="wc-eyebrow" style={{ marginBottom: 6 }}>STARTING XI</div>
+      <div style={{ display: "grid", gap: 5 }}>
+        {lineup.startXI.map((player) => (
+          <div key={player.id} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 8, alignItems: "baseline", fontSize: 12.5 }}>
+            <span className="wc-num" style={{ color: "var(--faint)" }}>{player.number ?? "-"}</span>
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
+            <span className="wc-num" style={{ color: "var(--dim)", fontSize: 10 }}>{player.position ?? ""}</span>
+          </div>
+        ))}
+      </div>
+      {lineup.substitutes.length > 0 && (
+        <>
+          <div className="wc-eyebrow" style={{ margin: "14px 0 6px" }}>BENCH</div>
+          <div style={{ display: "grid", gap: 5 }}>
+            {lineup.substitutes.map((player) => (
+              <div key={player.id} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 8, alignItems: "baseline", fontSize: 12.5 }}>
+                <span className="wc-num" style={{ color: "var(--faint)" }}>{player.number ?? "-"}</span>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
+                <span className="wc-num" style={{ color: "var(--dim)", fontSize: 10 }}>{player.position ?? ""}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MatchDetailDialog({ game, onClose }: { game: Game; onClose: () => void }) {
+  const timeline = [...(game.events ?? [])].sort((a, b) => (a.minute ?? 999) - (b.minute ?? 999) || (a.extra ?? 0) - (b.extra ?? 0));
+  const statRows = statsRows(game);
+  const title = `${T[game.a ?? ""]?.n ?? game.aName ?? "TBD"} vs ${T[game.b ?? ""]?.n ?? game.bName ?? "TBD"}`;
+  return (
+    <div
+      role="presentation"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 80,
+        background: "rgba(0,0,0,0.42)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="wc-card"
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "min(760px, 100%)",
+          maxHeight: "86vh",
+          overflow: "auto",
+          padding: 0,
+          background: "var(--surface)",
+        }}
+      >
+        <div style={{ padding: "18px 18px 14px", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+            <div>
+              <div className="wc-eyebrow" style={{ marginBottom: 7 }}>
+                {game.status === "live" ? clockLabel(game) : kickoffLabel(game)} · {fixtureStageLabel(game.round, game.group)}
+              </div>
+              <h2 style={{ margin: 0, fontSize: 21 }}>{title}</h2>
+              {game.venue && <div style={{ marginTop: 5, color: "var(--dim)", fontSize: 13 }}>{game.venue}</div>}
+            </div>
+            <button type="button" className="wc-icon-btn" aria-label="Close match details" onClick={onClose} style={{ flex: "none" }}>
+              ×
+            </button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 12, alignItems: "center", marginTop: 18 }}>
+            <FixtureSide code={game.a} label={game.aName} mine={false} align="left" state="even" />
+            <div className="wc-num" style={{ fontSize: 22, fontWeight: 700, textAlign: "center" }}>
+              {hasScore(game) ? `${game.sa} - ${game.sb}` : "vs"}
+            </div>
+            <FixtureSide code={game.b} label={game.bName} mine={false} align="right" state="even" />
+          </div>
+        </div>
+
+        <div style={{ padding: 18, display: "grid", gap: 20 }}>
+          <section>
+            <div className="wc-eyebrow" style={{ marginBottom: 10 }}>MATCH TIMELINE</div>
+            {timeline.length === 0 ? (
+              <div style={{ color: "var(--dim)", fontSize: 13 }}>No match events published yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {timeline.map((event) => (
+                  <div
+                    key={event.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "46px 1fr",
+                      gap: 12,
+                      alignItems: "start",
+                      padding: "9px 0",
+                      borderBottom: "1px solid var(--line)",
+                    }}
+                  >
+                    <span className="wc-num" style={{ color: "var(--lime-ink)", fontWeight: 700 }}>{minuteLabel(event) || "-"}</span>
+                    <div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+                        <strong style={{ fontSize: 13.5 }}>{eventLabel(event)}</strong>
+                        <span style={{ color: "var(--dim)", fontSize: 12 }}>{event.teamName}</span>
+                      </div>
+                      <div style={{ color: "var(--text)", fontSize: 13, marginTop: 2 }}>{eventText(event) || event.detail || "No detail"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="wc-eyebrow" style={{ marginBottom: 10 }}>LINEUPS</div>
+            {!game.lineups?.length ? (
+              <div style={{ color: "var(--dim)", fontSize: 13 }}>Lineups will appear when the provider publishes them.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20 }}>
+                {game.lineups.map((lineup) => <LineupColumn key={lineup.teamName} lineup={lineup} />)}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="wc-eyebrow" style={{ marginBottom: 10 }}>MATCH STATS</div>
+            {statRows.length === 0 ? (
+              <div style={{ color: "var(--dim)", fontSize: 13 }}>Match stats will appear as the game data comes in.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {statRows.map(([type, row]) => (
+                  <div key={type} style={{ display: "grid", gridTemplateColumns: "64px 1fr 64px", gap: 10, alignItems: "center", fontSize: 12.5 }}>
+                    <span className="wc-num" style={{ textAlign: "left", fontWeight: 700 }}>{valueLabel(row.a)}</span>
+                    <span style={{ textAlign: "center", color: "var(--dim)" }}>{type}</span>
+                    <span className="wc-num" style={{ textAlign: "right", fontWeight: 700 }}>{valueLabel(row.b)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
@@ -282,6 +485,7 @@ export function FixturesScreen() {
   const mineCodes = enrichPlayerTeams(player).map((t) => t.code);
   const [filter, setFilter] = useState<Filter>("Upcoming");
   const [stageFilter, setStageFilter] = useState<StageFilter>("All stages");
+  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const resultById = useMemo(() => new Map(results.map((result) => [result.id, result])), [results]);
   const liveById = useMemo(() => new Map(liveState.map((state) => [state.fixtureId, state])), [liveState]);
   const allGames = useMemo<Game[]>(() => fixtures.map((fixture) => {
@@ -298,6 +502,8 @@ export function FixturesScreen() {
       statusShort: live?.statusShort ?? undefined,
       statusLong: live?.statusLong ?? undefined,
       events: live?.events?.length ? live.events : fixture.events,
+      lineups: live?.lineups?.length ? live.lineups : fixture.lineups,
+      statistics: live?.statistics?.length ? live.statistics : fixture.statistics,
       status: result ? "finished" : live ? "live" : fixture.status,
     };
   }), [fixtures, liveById, resultById]);
@@ -362,13 +568,14 @@ export function FixturesScreen() {
               </div>
               <div className="wc-fixture-grid">
                 {d.games.map((g) => (
-                  <FixtureCard key={g.id} g={g} mineCodes={mineCodes} />
+                  <FixtureCard key={g.id} g={g} mineCodes={mineCodes} onOpen={() => setSelectedGame(g)} />
                 ))}
               </div>
             </div>
           ))}
         </div>
       )}
+      {selectedGame && <MatchDetailDialog game={selectedGame} onClose={() => setSelectedGame(null)} />}
     </div>
   );
 }
