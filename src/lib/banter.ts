@@ -17,7 +17,20 @@ export type BanterReactionView = {
   mine: boolean;
 };
 
-export type BanterPostView = {
+export type BanterReplyView = {
+  id: string;
+  uid: string;
+  name: string;
+  short: string;
+  body: string;
+  createdAt: string;
+  reactions: BanterReactionView[];
+  reactionTotal: number;
+  isMine: boolean;
+};
+
+export type BanterMessageView = {
+  type: "message";
   id: string;
   uid: string;
   name: string;
@@ -27,12 +40,31 @@ export type BanterPostView = {
   updatedAt?: string | null;
   reactions: BanterReactionView[];
   reactionTotal: number;
+  replies: BanterReplyView[];
+  replyCount: number;
   isMine: boolean;
   canDelete: boolean;
 };
 
+export type BanterEventAccent = "neutral" | "lime" | "gold" | "down" | "violet";
+
+export type BanterEventView = {
+  type: "event";
+  id: string;
+  icon: string;
+  accent: BanterEventAccent;
+  title: string;
+  sub: string;
+  occurredAt: string;
+  reactions: BanterReactionView[];
+  reactionTotal: number;
+};
+
+export type BanterFeedItem = BanterMessageView | BanterEventView;
+
 export type BanterFeedView = {
-  posts: BanterPostView[];
+  items: BanterFeedItem[];
+  posts: BanterMessageView[];
   memberCount: number;
   me: {
     uid: string;

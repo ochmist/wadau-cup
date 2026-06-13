@@ -2,7 +2,16 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
-import { BANTER_REACTIONS, teamMentionMap, type BanterFeedView, type BanterPostView, type BanterReactionKey } from "@/lib/banter";
+import {
+  BANTER_REACTIONS,
+  teamMentionMap,
+  type BanterEventView,
+  type BanterFeedItem,
+  type BanterFeedView,
+  type BanterMessageView,
+  type BanterReactionKey,
+  type BanterReplyView,
+} from "@/lib/banter";
 import { T } from "@/lib/data";
 
 function timeAgo(iso: string) {
@@ -59,23 +68,29 @@ function BtAvatar({ short, active = false, size = 36 }: { short: string; active?
 }
 
 function ReactionRow({
-  post,
+  id,
+  targetType,
+  reactions,
   busy,
   onReact,
+  replyId,
 }: {
-  post: BanterPostView;
+  id: string;
+  targetType: "post" | "reply" | "event";
+  reactions: BanterMessageView["reactions"];
   busy: string | null;
-  onReact: (postId: string, reaction: BanterReactionKey) => void;
+  onReact: (id: string, reaction: BanterReactionKey, targetType: "post" | "reply" | "event", replyId?: string) => void;
+  replyId?: string;
 }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, flexWrap: "wrap" }}>
-      {post.reactions.map((reaction) => (
+      {reactions.map((reaction) => (
         <button
           key={reaction.key}
           type="button"
           className={"wc-bt-react" + (reaction.mine ? " mine" : "")}
-          onClick={() => onReact(post.id, reaction.key)}
-          disabled={busy === `${post.id}:${reaction.key}`}
+          onClick={() => onReact(id, reaction.key, targetType, replyId)}
+          disabled={busy === `${targetType}:${id}:${replyId ?? ""}:${reaction.key}`}
           aria-label={`${reaction.label} reaction`}
         >
           <span className="em">{reaction.emoji}</span>
@@ -86,14 +101,105 @@ function ReactionRow({
   );
 }
 
-function BanterMessage({
-  post,
+function BanterReply({
+  postId,
+  reply,
   busyReaction,
   onReact,
 }: {
-  post: BanterPostView;
+  postId: string;
+  reply: BanterReplyView;
   busyReaction: string | null;
-  onReact: (postId: string, reaction: BanterReactionKey) => void;
+  onReact: (id: string, reaction: BanterReactionKey, targetType: "post" | "reply" | "event", replyId?: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 9, marginTop: 11 }}>
+      <BtAvatar short={reply.short} active={reply.isMine} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "-0.01em" }}>{reply.isMine ? "You" : reply.name}</span>
+          <span className="wc-num" style={{ fontSize: 10, color: "var(--faint)" }}>{timeAgo(reply.createdAt)}</span>
+        </div>
+        <div style={{ fontSize: 13.5, lineHeight: 1.45, marginTop: 3, color: "var(--text)" }}>
+          <BanterText text={reply.body} />
+        </div>
+        <ReactionRow
+          id={postId}
+          replyId={reply.id}
+          targetType="reply"
+          reactions={reply.reactions}
+          busy={busyReaction}
+          onReact={onReact}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ReplyComposer({
+  postId,
+  posting,
+  onSubmit,
+  onCancel,
+}: {
+  postId: string;
+  posting: boolean;
+  onSubmit: (postId: string, body: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [body, setBody] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = body.trim();
+    if (!next || posting) return;
+    await onSubmit(postId, next);
+    setBody("");
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 11 }}>
+      <input
+        className="wc-bt-input"
+        style={{
+          background: "var(--surface-2)",
+          border: "1px solid var(--line-2)",
+          borderRadius: 11,
+          padding: "9px 11px",
+        }}
+        placeholder="Reply..."
+        value={body}
+        maxLength={280}
+        onChange={(event) => setBody(event.target.value)}
+      />
+      <button className="wc-bt-send" style={{ width: 34, height: 34, borderRadius: 10 }} disabled={!body.trim() || posting} aria-label="Send reply">
+        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3.5 10h11M10 5l5 5-5 5" />
+        </svg>
+      </button>
+      <button type="button" className="wc-bt-reply-btn" onClick={onCancel}>Cancel</button>
+    </form>
+  );
+}
+
+function BanterMessage({
+  post,
+  busyReaction,
+  replying,
+  postingReply,
+  onReact,
+  onReply,
+  onSubmitReply,
+  onCancelReply,
+}: {
+  post: BanterMessageView;
+  busyReaction: string | null;
+  replying: boolean;
+  postingReply: boolean;
+  onReact: (id: string, reaction: BanterReactionKey, targetType: "post" | "reply" | "event", replyId?: string) => void;
+  onReply: (postId: string) => void;
+  onSubmitReply: (postId: string, body: string) => Promise<void>;
+  onCancelReply: () => void;
 }) {
   return (
     <article style={{ display: "flex", gap: 11, padding: "10px 0" }}>
@@ -124,9 +230,77 @@ function BanterMessage({
         >
           <BanterText text={post.body} />
         </div>
-        <ReactionRow post={post} busy={busyReaction} onReact={onReact} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <ReactionRow id={post.id} targetType="post" reactions={post.reactions} busy={busyReaction} onReact={onReact} />
+          <button type="button" className="wc-bt-reply-btn" style={{ marginTop: 9 }} onClick={() => onReply(post.id)}>
+            Reply{post.replyCount ? ` · ${post.replyCount}` : ""}
+          </button>
+        </div>
+        {post.replies.length > 0 && (
+          <div style={{ marginTop: 6, marginLeft: 6, paddingLeft: 13, borderLeft: "1.5px solid var(--line)" }}>
+            {post.replies.map((reply) => (
+              <BanterReply key={reply.id} postId={post.id} reply={reply} busyReaction={busyReaction} onReact={onReact} />
+            ))}
+          </div>
+        )}
+        {replying && (
+          <ReplyComposer postId={post.id} posting={postingReply} onSubmit={onSubmitReply} onCancel={onCancelReply} />
+        )}
       </div>
     </article>
+  );
+}
+
+function eventColors(accent: BanterEventView["accent"]) {
+  if (accent === "lime") return { line: "var(--lime-line)", soft: "var(--lime-soft)" };
+  if (accent === "gold") return { line: "var(--gold-line)", soft: "var(--gold-soft)" };
+  if (accent === "down") return { line: "var(--down)", soft: "var(--down-soft)" };
+  if (accent === "violet") return { line: "var(--violet)", soft: "var(--violet-soft)" };
+  return { line: "var(--line-2)", soft: "var(--surface-2)" };
+}
+
+function BanterEvent({
+  item,
+  busyReaction,
+  onReact,
+}: {
+  item: BanterEventView;
+  busyReaction: string | null;
+  onReact: (id: string, reaction: BanterReactionKey, targetType: "post" | "reply" | "event", replyId?: string) => void;
+}) {
+  const colors = eventColors(item.accent);
+  return (
+    <div style={{ display: "flex", justifyContent: "center", padding: "9px 0" }}>
+      <div className="wc-card" style={{ width: "100%", maxWidth: 600, padding: "13px 15px 12px", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: colors.line }} />
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+          <div
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 9,
+              flex: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 15,
+              background: colors.soft,
+              border: "1px solid " + colors.line,
+            }}
+          >
+            {item.icon}
+          </div>
+          <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+            <span className="wc-num" style={{ position: "absolute", top: 1, right: 0, fontSize: 10.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
+              {timeAgo(item.occurredAt)}
+            </span>
+            <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.3, paddingRight: 64 }}>{item.title}</div>
+            <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 4, lineHeight: 1.45 }}>{item.sub}</div>
+            <ReactionRow id={item.id} targetType="event" reactions={item.reactions} busy={busyReaction} onReact={onReact} />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -223,7 +397,7 @@ function RailCard({ label, accent, children }: { label: string; accent?: string;
   );
 }
 
-function BanterRail({ posts }: { posts: BanterPostView[] }) {
+function BanterRail({ items, posts }: { items: BanterFeedItem[]; posts: BanterMessageView[] }) {
   const loudest = useMemo(() => {
     const counts = new Map<string, { name: string; short: string; count: number }>();
     for (const post of posts) {
@@ -233,17 +407,17 @@ function BanterRail({ posts }: { posts: BanterPostView[] }) {
     }
     return [...counts.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 5);
   }, [posts]);
-  const top = posts.reduce<BanterPostView | null>((best, post) => (!best || post.reactionTotal > best.reactionTotal ? post : best), null);
-  const latest = posts[posts.length - 1] ?? null;
+  const top = posts.reduce<BanterMessageView | null>((best, post) => (!best || post.reactionTotal > best.reactionTotal ? post : best), null);
+  const latest = items[items.length - 1] ?? null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, position: "sticky", top: 18 }}>
       <RailCard label="Heating up" accent="var(--gold)">
         <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>
-          {latest ? latest.body : "Quiet for now"}
+          {latest ? latest.type === "event" ? latest.title : latest.body : "Quiet for now"}
         </div>
         <div className="wc-num" style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 4 }}>
-          {latest ? `${timeAgo(latest.createdAt)} ago` : "No posts yet"}
+          {latest ? `${timeAgo(latest.type === "event" ? latest.occurredAt : latest.createdAt)} ago` : "No posts yet"}
         </div>
       </RailCard>
 
@@ -312,7 +486,9 @@ export function BanterScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
+  const [postingReply, setPostingReply] = useState(false);
   const [busyReaction, setBusyReaction] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
 
   const loadFeed = useCallback(async () => {
     if (!user) return;
@@ -361,15 +537,41 @@ export function BanterScreen() {
     }
   }, [loadFeed, user]);
 
-  const react = useCallback(async (postId: string, reaction: BanterReactionKey) => {
+  const submitReply = useCallback(async (parentId: string, body: string) => {
     if (!user) return;
-    setBusyReaction(`${postId}:${reaction}`);
+    setPostingReply(true);
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`/api/banter/${postId}/reaction`, {
+      const res = await fetch("/api/banter", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ reaction }),
+        body: JSON.stringify({ parentId, body }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to reply");
+      setReplyingTo(null);
+      await loadFeed();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPostingReply(false);
+    }
+  }, [loadFeed, user]);
+
+  const react = useCallback(async (
+    id: string,
+    reaction: BanterReactionKey,
+    targetType: "post" | "reply" | "event",
+    replyId?: string,
+  ) => {
+    if (!user) return;
+    setBusyReaction(`${targetType}:${id}:${replyId ?? ""}:${reaction}`);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/banter/${encodeURIComponent(id)}/reaction`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ reaction, targetType, replyId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to react");
@@ -381,13 +583,32 @@ export function BanterScreen() {
     }
   }, [loadFeed, user]);
 
-  const posts = feed?.posts ?? [];
+  const items = feed?.items ?? feed?.posts ?? [];
+  const posts = feed?.posts ?? items.filter((item): item is BanterMessageView => item.type === "message");
   const renderContent = () => {
     if (loading) {
       return <div className="wc-card" style={{ padding: 28, marginTop: 16, color: "var(--dim)" }}>Loading banter...</div>;
     }
-    if (!posts.length) return <BanterEmpty />;
-    return <div>{posts.map((post) => <BanterMessage key={post.id} post={post} busyReaction={busyReaction} onReact={react} />)}</div>;
+    if (!items.length) return <BanterEmpty />;
+    return (
+      <div>
+        {items.map((item) => item.type === "event" ? (
+          <BanterEvent key={item.id} item={item} busyReaction={busyReaction} onReact={react} />
+        ) : (
+          <BanterMessage
+            key={item.id}
+            post={item}
+            busyReaction={busyReaction}
+            replying={replyingTo === item.id}
+            postingReply={postingReply}
+            onReact={react}
+            onReply={setReplyingTo}
+            onSubmitReply={submitReply}
+            onCancelReply={() => setReplyingTo(null)}
+          />
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -400,7 +621,7 @@ export function BanterScreen() {
             {renderContent()}
             <BanterComposer me={feed?.me ?? null} posting={posting} onSubmit={submitPost} sticky />
           </div>
-          <BanterRail posts={posts} />
+          <BanterRail items={items} posts={posts} />
         </div>
       </div>
 
