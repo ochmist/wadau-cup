@@ -3,7 +3,7 @@ import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { adminAuth, adminDb } from "@/lib/firebase-admin";
 import { POOL_ID } from "@/lib/config";
 import {
-  BANTER_REACTIONS,
+  banterReactionMeta,
   cleanBanterBody,
   initials,
   type BanterEventView,
@@ -85,14 +85,17 @@ async function requireBanterUser(req: NextRequest) {
 }
 
 function serializeReactions(reactions: ReactionMap | undefined, uid: string) {
-  return BANTER_REACTIONS.map((reaction) => {
-    const voters = Array.isArray(reactions?.[reaction.key]) ? reactions[reaction.key] ?? [] : [];
+  return Object.entries(reactions ?? {})
+    .map(([key, voters]) => {
+    const voterList = Array.isArray(voters) ? voters : [];
+    const meta = banterReactionMeta(key);
     return {
-      ...reaction,
-      count: voters.length,
-      mine: voters.includes(uid),
+      ...meta,
+      count: voterList.length,
+      mine: voterList.includes(uid),
     };
-  });
+  }).filter((reaction) => reaction.count > 0)
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
 function reactionTotal(reactions: ReturnType<typeof serializeReactions>) {
@@ -252,7 +255,8 @@ export async function GET(req: NextRequest) {
     const items: BanterFeedItem[] = [...events, ...posts]
       .sort((a, b) => Date.parse(a.type === "event" ? a.occurredAt : a.createdAt) - Date.parse(b.type === "event" ? b.occurredAt : b.createdAt))
       .slice(-120);
-    const notificationCount = posts.reduce((sum, post) => sum + post.unreadReplyCount, 0);
+    const unreadPostCount = posts.filter((post) => post.uid !== session.uid && Date.parse(post.createdAt) > lastSeenMs).length;
+    const notificationCount = unreadPostCount + posts.reduce((sum, post) => sum + post.unreadReplyCount, 0);
 
     await userMetaRef.set({ lastSeenAt: FieldValue.serverTimestamp() }, { merge: true });
 

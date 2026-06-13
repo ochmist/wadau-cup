@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import {
+  BANTER_EMOJI_GROUPS,
   BANTER_REACTIONS,
   teamMentionMap,
   type BanterEventView,
@@ -85,7 +86,9 @@ function ReactionRow({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [activeGroup, setActiveGroup] = useState<string>(BANTER_EMOJI_GROUPS[0].label);
   const visibleReactions = reactions.filter((reaction) => reaction.count > 0 || reaction.mine);
+  const group = BANTER_EMOJI_GROUPS.find((entry) => entry.label === activeGroup) ?? BANTER_EMOJI_GROUPS[0];
 
   function choose(reaction: BanterReactionKey) {
     onReact(id, reaction, targetType, replyId);
@@ -121,11 +124,25 @@ function ReactionRow({
         </button>
         {open && (
           <span className="wc-bt-picker">
-            {BANTER_REACTIONS.map((reaction) => (
-              <button key={reaction.key} type="button" onClick={() => choose(reaction.key)} aria-label={reaction.label}>
-                {reaction.emoji}
-              </button>
-            ))}
+            <span className="wc-bt-picker-tabs">
+              {BANTER_EMOJI_GROUPS.map((entry) => (
+                <button
+                  key={entry.label}
+                  type="button"
+                  className={entry.label === group.label ? "active" : ""}
+                  onClick={() => setActiveGroup(entry.label)}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </span>
+            <span className="wc-bt-picker-grid">
+              {group.emojis.map((emoji) => (
+                <button key={emoji} type="button" onClick={() => choose(emoji)} aria-label={`React ${emoji}`}>
+                  {emoji}
+                </button>
+              ))}
+            </span>
           </span>
         )}
       </span>
@@ -481,13 +498,18 @@ function BanterRail({ items, posts }: { items: BanterFeedItem[]; posts: BanterMe
   );
 }
 
-function BanterHeader({ memberCount, compact = false }: { memberCount: number; compact?: boolean }) {
+function BanterHeader({ memberCount, notificationCount, compact = false }: { memberCount: number; notificationCount: number; compact?: boolean }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 6, gap: 12 }}>
       <div>
         <div style={{ fontSize: compact ? 19 : 22, fontWeight: 800, letterSpacing: "-0.02em" }}>Banter</div>
         <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 3 }}>
           <span style={{ color: "var(--lime-ink)", fontWeight: 600 }}>{memberCount} in the pool</span> · live pool chat
+          {notificationCount > 0 && (
+            <span className="wc-num" style={{ color: "var(--lime-ink)", fontWeight: 800 }}>
+              {" "}· {notificationCount} new
+            </span>
+          )}
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -637,7 +659,7 @@ export function BanterScreen() {
       <div className="wc-desktop-only" style={{ maxWidth: 1120, margin: "0 auto", padding: "22px 28px 0" }}>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 28, alignItems: "start" }}>
           <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <BanterHeader memberCount={feed?.memberCount ?? 0} />
+            <BanterHeader memberCount={feed?.memberCount ?? 0} notificationCount={feed?.notificationCount ?? 0} />
             {error && <div className="wc-notice" style={{ margin: "12px 0" }}>{error}</div>}
             {renderContent()}
             <BanterComposer me={feed?.me ?? null} posting={posting} onSubmit={submitPost} sticky />
@@ -647,7 +669,7 @@ export function BanterScreen() {
       </div>
 
       <div className="wc-mobile-only" style={{ display: "flex", flexDirection: "column", minHeight: "100%", padding: "10px 16px 0" }}>
-        <BanterHeader memberCount={feed?.memberCount ?? 0} compact />
+        <BanterHeader memberCount={feed?.memberCount ?? 0} notificationCount={feed?.notificationCount ?? 0} compact />
         {error && <div className="wc-notice" style={{ margin: "12px 0" }}>{error}</div>}
         {renderContent()}
         <BanterComposer me={feed?.me ?? null} posting={posting} onSubmit={submitPost} />

@@ -689,15 +689,49 @@ body {
   left: 0;
   bottom: calc(100% + 6px);
   display: flex;
-  gap: 4px;
-  padding: 5px;
-  border-radius: 999px;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  max-height: 330px;
+  padding: 10px;
+  border-radius: 14px;
   border: 1px solid var(--line-2);
   background: var(--surface);
   box-shadow: 0 14px 34px -22px rgba(0, 0, 0, 0.45);
   z-index: 4;
 }
-.wc-bt-picker button {
+.wc-bt-picker-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.wc-bt-picker-tabs button {
+  height: 26px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+.wc-bt-picker-tabs button.active {
+  border-color: var(--lime-line);
+  background: var(--lime-soft);
+  color: var(--lime-ink);
+}
+.wc-bt-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.wc-bt-picker-grid button {
   width: 30px;
   height: 30px;
   border: 0;
@@ -709,7 +743,7 @@ body {
   align-items: center;
   justify-content: center;
 }
-.wc-bt-picker button:hover {
+.wc-bt-picker-grid button:hover {
   background: var(--surface-3);
 }
 .wc-bt-reply-btn {

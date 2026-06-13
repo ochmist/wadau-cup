@@ -32,18 +32,21 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const [playerSnap, seenSnap, postsSnap] = await Promise.all([
+    const [playerSnap, seenSnap, ownPostsSnap, recentPostsSnap] = await Promise.all([
       adminDb.doc(`pools/${POOL_ID}/players/${decoded.uid}`).get(),
       adminDb.doc(`pools/${POOL_ID}/banterMeta/seen-${decoded.uid}`).get(),
       adminDb.collection(`pools/${POOL_ID}/banter`).where("uid", "==", decoded.uid).limit(80).get(),
+      adminDb.collection(`pools/${POOL_ID}/banter`).orderBy("createdAt", "desc").limit(80).get(),
     ]);
     if (!playerSnap.exists) {
       return NextResponse.json({ count: 0 });
     }
 
     const lastSeenMs = timestampMs(seenSnap.get("lastSeenAt"));
-    let count = 0;
-    await Promise.all(postsSnap.docs.map(async (post) => {
+    let count = recentPostsSnap.docs.filter((post) => (
+      post.get("uid") !== decoded.uid && timestampMs(post.get("createdAt")) > lastSeenMs
+    )).length;
+    await Promise.all(ownPostsSnap.docs.map(async (post) => {
       const repliesSnap = await post.ref.collection("replies").orderBy("createdAt", "desc").limit(20).get();
       count += repliesSnap.docs.filter((reply) => reply.get("uid") !== decoded.uid && timestampMs(reply.get("createdAt")) > lastSeenMs).length;
     }));
