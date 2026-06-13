@@ -23,6 +23,12 @@ export type DisplayPlayer = {
 };
 import { useTheme } from "@/lib/theme";
 
+const TIER_ORDER = ["A", "B", "C", "D", "E", "F"];
+
+function compareTeamsByTier(a: PlayerTeam, b: PlayerTeam) {
+  return TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier) || a.code.localeCompare(b.code);
+}
+
 function moneyGapLabel(p: DisplayPlayer, moneyCutoffPoints?: number | null) {
   if (p.rank <= 0) return "unranked";
   if (p.rank <= 3) return null;
@@ -95,6 +101,7 @@ export function FlagRow({
   hidden?: boolean;
 }) {
   const [sel, setSel] = useState<number | null>(null);
+  const orderedTeams = [...teams].sort(compareTeamsByTier);
   useEffect(() => {
     if (sel === null) return;
     const close = () => setSel(null);
@@ -126,7 +133,7 @@ export function FlagRow({
   }
   return (
     <div className="wc-flags">
-      {teams.map((t, i) => (
+      {orderedTeams.map((t, i) => (
         <span
           key={t.code + t.tier}
           className={"wc-flag " + (t.alive ? "alive" : "out")}

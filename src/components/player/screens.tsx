@@ -11,11 +11,12 @@ import { T } from "@/lib/data";
 import { useStandings } from "@/hooks/useStandings";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
+import { useFixtures } from "@/hooks/useFixtures";
 import { useAuth } from "@/lib/auth";
 import { useCountdown } from "@/lib/countdown";
 import { EdgeBanner } from "@/components/edge/EdgeBanner";
 import { displayPhone } from "@/lib/phone";
-import type { ResultWithId } from "@/lib/firestore";
+import type { FixtureWithId, ResultWithId } from "@/lib/firestore";
 import type { SerializedPlayer, Tier } from "@/lib/types";
 import type { PlayerTeam } from "@/lib/data";
 
@@ -48,11 +49,16 @@ function scoringLabel(result: ResultWithId, teamCode: string) {
   return "Win";
 }
 
-function scoringPathLabel(result: ResultWithId, teamCode: string, tier: Tier) {
-  return `Tier ${tier} · ${result.round} · ${scoringLabel(result, teamCode)}`;
-}
-
 type PointEventTuple = [string, Tier, number];
+type AccountingEvent = {
+  id: string;
+  label: string;
+  opponentName: string;
+  opponentFlag: string;
+  detail: string;
+  points: number;
+  tone: "earned" | "lost" | "pending";
+};
 
 function pointEventTuple(value: unknown): PointEventTuple | null {
   if (Array.isArray(value)) {
@@ -75,46 +81,90 @@ function pointEventTuple(value: unknown): PointEventTuple | null {
   return null;
 }
 
-function teamPointEvents(team: PlayerTeam, results: ResultWithId[]) {
-  return [...results]
+function localFixtureTime(value?: string | null) {
+  if (!value) return "Time TBD";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time TBD";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function fixtureSortMs(fixture: FixtureWithId) {
+  const ms = Date.parse(fixture.kickoffAt);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function teamAccountingEvents(team: PlayerTeam, results: ResultWithId[], fixtures: FixtureWithId[]): AccountingEvent[] {
+  const resultRows = [...results]
+    .filter((result) => result.a === team.code || result.b === team.code)
     .sort((a, b) => resultSortKey(a) - resultSortKey(b))
-    .flatMap((result) => {
-      const matches = (result.pts ?? [])
+    .map((result) => {
+      const pointRow = (result.pts ?? [])
         .map(pointEventTuple)
         .filter((entry): entry is PointEventTuple => Boolean(entry))
-        .filter(([code, tier, points]) => code === team.code && tier === team.tier && points > 0);
-      return matches.map(([, tier, points]) => {
-        const opponentCode = result.a === team.code ? result.b : result.a;
-        const opponent = T[opponentCode];
-        return {
-          id: result.id,
-          round: result.round,
-          label: scoringPathLabel(result, team.code, tier),
-          opponentName: opponent?.n ?? opponentCode,
-          opponentFlag: opponent?.f ?? "🏳",
-          score: resultScore(result),
-          points,
-        };
-      });
+        .find((entry) => entry[0] === team.code && entry[1] === team.tier);
+      const points = pointRow?.[2] ?? 0;
+      const opponentCode = result.a === team.code ? result.b : result.a;
+      const opponent = T[opponentCode];
+      const didDraw = result.win === "draw";
+      const didWin = result.win === team.code;
+      const outcome = didWin ? scoringLabel(result, team.code) : didDraw ? "Draw" : "Loss";
+      const score = resultScore(result);
+      return {
+        id: result.id,
+        label: `Tier ${team.tier} · ${result.round} · ${outcome}`,
+        opponentName: opponent?.n ?? opponentCode,
+        opponentFlag: opponent?.f ?? "🏳",
+        detail: `${score || "Result entered"} · ${points > 0 ? `earned ${points}` : didDraw ? "no points awarded" : "lost, 0 pts"}`,
+        points,
+        tone: points > 0 ? "earned" as const : "lost" as const,
+      };
     });
+
+  const resultIds = new Set(results.map((result) => result.id));
+  const fixtureRows = [...fixtures]
+    .filter((fixture) => !resultIds.has(fixture.id))
+    .filter((fixture) => fixture.a === team.code || fixture.b === team.code)
+    .sort((a, b) => fixtureSortMs(a) - fixtureSortMs(b))
+    .map((fixture) => {
+      const opponentCode = fixture.a === team.code ? fixture.b : fixture.a;
+      const opponentName = fixture.a === team.code ? fixture.bName : fixture.aName;
+      const opponent = opponentCode ? T[opponentCode] : null;
+      const state = fixture.status === "live"
+        ? "Live now"
+        : fixture.status === "finished"
+          ? "Awaiting result"
+          : "Not played yet";
+      return {
+        id: fixture.id,
+        label: `Tier ${team.tier} · ${fixture.round} · ${state}`,
+        opponentName: opponent?.n ?? opponentName ?? "TBD",
+        opponentFlag: opponent?.f ?? "•",
+        detail: fixture.status === "live" ? "In progress, points pending" : localFixtureTime(fixture.kickoffAt),
+        points: 0,
+        tone: "pending" as const,
+      };
+    });
+
+  return [...resultRows, ...fixtureRows];
 }
 
 function PointsPath({
   player,
   results,
+  fixtures,
   loading,
 }: {
   player: SerializedPlayer;
   results: ResultWithId[];
+  fixtures: FixtureWithId[];
   loading: boolean;
 }) {
   const rows = player.teams.map((team) => {
-    const events = teamPointEvents(team, results);
+    const events = teamAccountingEvents(team, results, fixtures);
     const explained = events.reduce((sum, event) => sum + event.points, 0);
     return { team, events, explained };
   });
   const explainedTotal = rows.reduce((sum, row) => sum + row.explained, 0);
-  const hasEvents = rows.some((row) => row.events.length > 0);
 
   return (
     <div className="wc-card" style={{ padding: "16px 16px" }}>
@@ -126,10 +176,6 @@ function PointsPath({
       </div>
       {loading ? (
         <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>Loading scoring events…</div>
-      ) : !hasEvents ? (
-        <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14 }}>
-          No locked scoring events yet.
-        </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
           {rows.map(({ team, events, explained }) => (
@@ -166,18 +212,26 @@ function PointsPath({
                           {event.label}
                         </div>
                         <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          vs {event.opponentFlag} {event.opponentName}{event.score ? ` · ${event.score}` : ""}
+                          vs {event.opponentFlag} {event.opponentName} · {event.detail}
                         </div>
                       </div>
-                      <span className="wc-num" style={{ fontSize: 13, fontWeight: 800, color: "var(--lime-ink)", alignSelf: "center" }}>
-                        +{event.points}
+                      <span
+                        className="wc-num"
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: event.tone === "earned" ? "var(--lime-ink)" : event.tone === "lost" ? "var(--down)" : "var(--dim)",
+                          alignSelf: "center",
+                        }}
+                      >
+                        {event.points > 0 ? `+${event.points}` : "0"}
                       </span>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div style={{ padding: "9px 12px", fontSize: 12.5, color: "var(--dim)" }}>
-                  No points earned yet.
+                  No fixtures found yet.
                 </div>
               )}
               {explained !== team.pts && (
@@ -486,6 +540,7 @@ export function PlayerScreen({ name }: { name: string }) {
   const { players: livePlayers, scaleMax: liveScaleMax, loading } = useStandings(user?.uid);
   const { player: myPlayer, loading: myPlayerLoading } = useMyData();
   const { results, loading: resultsLoading } = useResults();
+  const { fixtures, loading: fixturesLoading } = useFixtures();
   const countdown = useCountdown();
 
   const myTeams = enrichPlayerTeams(myPlayer).map((t) => ({ ...t, alive: t.alive }));
@@ -654,7 +709,7 @@ export function PlayerScreen({ name }: { name: string }) {
             <div className="wc-eyebrow" aria-hidden style={{ visibility: "hidden", marginBottom: 8 }}>·</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {canViewPicks && Ceiling}{Gap}{canViewPicks && Tie}
-              {canViewPicks && <PointsPath player={p} results={results} loading={resultsLoading} />}
+              {canViewPicks && <PointsPath player={p} results={results} fixtures={fixtures} loading={resultsLoading || fixturesLoading} />}
             </div>
           </div>
         </div>
@@ -678,7 +733,7 @@ export function PlayerScreen({ name }: { name: string }) {
             </div>
             <div style={{ marginTop: 18 }}>{Tie}</div>
             <div style={{ marginTop: 18 }}>
-              <PointsPath player={p} results={results} loading={resultsLoading} />
+              <PointsPath player={p} results={results} fixtures={fixtures} loading={resultsLoading || fixturesLoading} />
             </div>
           </>
         ) : (
