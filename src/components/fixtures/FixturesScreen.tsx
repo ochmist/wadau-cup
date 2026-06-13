@@ -13,7 +13,7 @@ import { useAuth } from "@/lib/auth";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
 import { useFixtures } from "@/hooks/useFixtures";
-import type { MatchEventDoc, MatchLineupTeamDoc, MatchStatisticDoc } from "@/lib/types";
+import type { MatchEventDoc, MatchLineupPlayerDoc, MatchLineupTeamDoc, MatchStatisticDoc } from "@/lib/types";
 
 type Game = {
   id: string;
@@ -283,6 +283,106 @@ function eventText(event: MatchEventDoc) {
   return [event.player, event.comments].filter(Boolean).join(" · ");
 }
 
+function cardColor(event: MatchEventDoc) {
+  const detail = (event.detail ?? "").toLowerCase();
+  if (detail.includes("red")) return "#ef4444";
+  if (detail.includes("yellow")) return "#facc15";
+  return "var(--gold)";
+}
+
+function ActivityIcon({ event }: { event: MatchEventDoc }) {
+  if (event.type === "goal") {
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: "50%",
+          display: "grid",
+          placeItems: "center",
+          background: "var(--surface-2)",
+          border: "1px solid var(--line)",
+          fontSize: 15,
+        }}
+      >
+        ⚽
+      </span>
+    );
+  }
+  if (event.type === "card") {
+    const color = cardColor(event);
+    return (
+      <span
+        aria-hidden
+        style={{
+          width: 18,
+          height: 24,
+          borderRadius: 3,
+          background: color,
+          boxShadow: "0 5px 14px rgba(0,0,0,0.2)",
+          transform: "rotate(6deg)",
+          border: color === "#facc15" ? "1px solid rgba(0,0,0,0.18)" : "1px solid rgba(255,255,255,0.18)",
+        }}
+      />
+    );
+  }
+  if (event.type === "substitution") {
+    return (
+      <span
+        className="wc-num"
+        aria-hidden
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: "50%",
+          display: "grid",
+          placeItems: "center",
+          background: "color-mix(in srgb, var(--lime) 18%, transparent)",
+          color: "var(--lime-ink)",
+          fontSize: 15,
+          fontWeight: 800,
+        }}
+      >
+        ↕
+      </span>
+    );
+  }
+  if (event.type === "var") {
+    return (
+      <span
+        className="wc-num"
+        aria-hidden
+        style={{
+          minWidth: 28,
+          height: 20,
+          borderRadius: 5,
+          display: "grid",
+          placeItems: "center",
+          background: "var(--surface-2)",
+          border: "1px solid var(--line)",
+          color: "var(--dim)",
+          fontSize: 9,
+          fontWeight: 800,
+        }}
+      >
+        VAR
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 9,
+        height: 9,
+        borderRadius: "50%",
+        background: "var(--faint)",
+      }}
+    />
+  );
+}
+
 function valueLabel(value: MatchStatisticDoc["value"]) {
   if (value == null || value === "") return "-";
   return String(value);
@@ -299,37 +399,194 @@ function statsRows(g: Game) {
   return Array.from(byType.entries()).filter(([, row]) => row.a != null || row.b != null);
 }
 
-function LineupColumn({ lineup }: { lineup: MatchLineupTeamDoc }) {
+function playerLastName(name: string) {
+  const parts = name.split(/\s+/).filter(Boolean);
+  return parts.at(-1) ?? name;
+}
+
+function parseGrid(grid?: string | null) {
+  const match = grid?.match(/^(\d+):(\d+)$/);
+  if (!match) return null;
+  return { row: Number(match[1]), col: Number(match[2]) };
+}
+
+function fallbackRows(players: MatchLineupPlayerDoc[]) {
+  const rank = (position?: string | null) => {
+    const value = (position ?? "").toUpperCase();
+    if (value === "G") return 1;
+    if (value === "D") return 2;
+    if (value === "M") return 3;
+    if (value === "F") return 4;
+    return 3;
+  };
+  const grouped = new Map<number, MatchLineupPlayerDoc[]>();
+  for (const player of players) {
+    const row = rank(player.position);
+    grouped.set(row, [...(grouped.get(row) ?? []), player]);
+  }
+  return Array.from(grouped.entries()).flatMap(([row, rowPlayers]) =>
+    rowPlayers.map((player, index) => ({ player, row, col: index + 1, rowSize: rowPlayers.length })),
+  );
+}
+
+function lineupPositions(players: MatchLineupPlayerDoc[]) {
+  const parsed = players.map((player) => ({ player, grid: parseGrid(player.grid) }));
+  if (parsed.some((entry) => !entry.grid)) return fallbackRows(players);
+  const rowSizes = new Map<number, number>();
+  for (const entry of parsed) {
+    if (!entry.grid) continue;
+    rowSizes.set(entry.grid.row, Math.max(rowSizes.get(entry.grid.row) ?? 0, entry.grid.col));
+  }
+  return parsed.map((entry) => ({
+    player: entry.player,
+    row: entry.grid?.row ?? 3,
+    col: entry.grid?.col ?? 1,
+    rowSize: rowSizes.get(entry.grid?.row ?? 3) ?? 1,
+  }));
+}
+
+function FormationPitch({ lineup }: { lineup: MatchLineupTeamDoc }) {
+  const positions = lineupPositions(lineup.startXI);
+  const maxRow = Math.max(4, ...positions.map((entry) => entry.row));
   return (
-    <div style={{ minWidth: 0 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-        <strong style={{ fontSize: 14 }}>{lineup.teamName}</strong>
-        {lineup.formation && <span className="wc-pill" style={{ padding: "2px 8px", fontSize: 9 }}>{lineup.formation}</span>}
-      </div>
-      {lineup.coach && <div style={{ color: "var(--dim)", fontSize: 12, marginBottom: 10 }}>Coach: {lineup.coach}</div>}
-      <div className="wc-eyebrow" style={{ marginBottom: 6 }}>STARTING XI</div>
-      <div style={{ display: "grid", gap: 5 }}>
-        {lineup.startXI.map((player) => (
-          <div key={player.id} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 8, alignItems: "baseline", fontSize: 12.5 }}>
-            <span className="wc-num" style={{ color: "var(--faint)" }}>{player.number ?? "-"}</span>
-            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
-            <span className="wc-num" style={{ color: "var(--dim)", fontSize: 10 }}>{player.position ?? ""}</span>
+    <div
+      style={{
+        position: "relative",
+        minHeight: 440,
+        border: "1px solid color-mix(in srgb, var(--lime) 34%, var(--line))",
+        borderRadius: 18,
+        overflow: "hidden",
+        background:
+          "linear-gradient(180deg, color-mix(in srgb, var(--lime) 10%, transparent), transparent 38%), repeating-linear-gradient(90deg, color-mix(in srgb, var(--lime) 8%, transparent) 0 18%, transparent 18% 36%), var(--surface-2)",
+      }}
+    >
+      <div style={{ position: "absolute", inset: 12, border: "1px solid color-mix(in srgb, var(--lime) 28%, transparent)", borderRadius: 14 }} />
+      <div style={{ position: "absolute", left: "50%", top: 12, bottom: 12, width: 1, background: "color-mix(in srgb, var(--lime) 24%, transparent)" }} />
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: 82,
+          height: 82,
+          transform: "translate(-50%, -50%)",
+          border: "1px solid color-mix(in srgb, var(--lime) 24%, transparent)",
+          borderRadius: "50%",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: "50%",
+          bottom: 12,
+          width: 180,
+          height: 58,
+          transform: "translateX(-50%)",
+          border: "1px solid color-mix(in srgb, var(--lime) 22%, transparent)",
+          borderBottom: 0,
+          borderRadius: "12px 12px 0 0",
+        }}
+      />
+      {positions.map(({ player, row, col, rowSize }) => {
+        const left = (col / (rowSize + 1)) * 100;
+        const top = 92 - (row / (maxRow + 1)) * 82;
+        return (
+          <div
+            key={player.id}
+            title={`${player.number ?? "-"} ${player.name}${player.position ? ` · ${player.position}` : ""}`}
+            style={{
+              position: "absolute",
+              left: `${left}%`,
+              top: `${top}%`,
+              transform: "translate(-50%, -50%)",
+              display: "grid",
+              justifyItems: "center",
+              gap: 4,
+              width: 76,
+            }}
+          >
+            <span
+              className="wc-num"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: "50%",
+                display: "grid",
+                placeItems: "center",
+                background: "var(--lime)",
+                color: "var(--on-lime)",
+                fontSize: 12,
+                fontWeight: 800,
+                boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
+              }}
+            >
+              {player.number ?? "-"}
+            </span>
+            <span
+              style={{
+                maxWidth: 76,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: 11,
+                fontWeight: 700,
+                textShadow: "0 1px 6px var(--surface)",
+              }}
+            >
+              {playerLastName(player.name)}
+            </span>
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LineupsSection({ lineups }: { lineups: MatchLineupTeamDoc[] | undefined }) {
+  const [selected, setSelected] = useState(0);
+  const lineup = lineups?.[Math.min(selected, Math.max(0, lineups.length - 1))];
+  if (!lineups?.length || !lineup) {
+    return <div style={{ color: "var(--dim)", fontSize: 13 }}>Lineups will appear when the provider publishes them.</div>;
+  }
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div className="wc-chiprow" style={{ overflowX: "auto", paddingBottom: 2 }}>
+        {lineups.map((item, index) => (
+          <button
+            key={item.teamName}
+            type="button"
+            className={"wc-chip" + (index === selected ? " on" : "")}
+            aria-pressed={index === selected}
+            onClick={() => setSelected(index)}
+          >
+            {item.teamName}
+          </button>
         ))}
       </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+        <div>
+          <strong style={{ fontSize: 16 }}>{lineup.teamName}</strong>
+          {lineup.coach && <div style={{ color: "var(--dim)", fontSize: 12, marginTop: 3 }}>Coach: {lineup.coach}</div>}
+        </div>
+        {lineup.formation && <span className="wc-pill" style={{ padding: "3px 9px", fontSize: 10 }}>{lineup.formation}</span>}
+      </div>
+      <FormationPitch lineup={lineup} />
       {lineup.substitutes.length > 0 && (
-        <>
-          <div className="wc-eyebrow" style={{ margin: "14px 0 6px" }}>BENCH</div>
-          <div style={{ display: "grid", gap: 5 }}>
+        <div>
+          <div className="wc-eyebrow" style={{ marginBottom: 8 }}>BENCH</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
             {lineup.substitutes.map((player) => (
-              <div key={player.id} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", gap: 8, alignItems: "baseline", fontSize: 12.5 }}>
-                <span className="wc-num" style={{ color: "var(--faint)" }}>{player.number ?? "-"}</span>
-                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{player.name}</span>
-                <span className="wc-num" style={{ color: "var(--dim)", fontSize: 10 }}>{player.position ?? ""}</span>
-              </div>
+              <span
+                key={player.id}
+                className="wc-pill"
+                title={`${player.number ?? "-"} ${player.name}${player.position ? ` · ${player.position}` : ""}`}
+                style={{ padding: "4px 8px", fontSize: 10, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                {player.number ?? "-"} · {playerLastName(player.name)}
+              </span>
             ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -392,46 +649,8 @@ function MatchDetailDialog({ game, onClose }: { game: Game; onClose: () => void 
 
         <div style={{ padding: 18, display: "grid", gap: 20 }}>
           <section>
-            <div className="wc-eyebrow" style={{ marginBottom: 10 }}>MATCH TIMELINE</div>
-            {timeline.length === 0 ? (
-              <div style={{ color: "var(--dim)", fontSize: 13 }}>No match events published yet.</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {timeline.map((event) => (
-                  <div
-                    key={event.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "46px 1fr",
-                      gap: 12,
-                      alignItems: "start",
-                      padding: "9px 0",
-                      borderBottom: "1px solid var(--line)",
-                    }}
-                  >
-                    <span className="wc-num" style={{ color: "var(--lime-ink)", fontWeight: 700 }}>{minuteLabel(event) || "-"}</span>
-                    <div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
-                        <strong style={{ fontSize: 13.5 }}>{eventLabel(event)}</strong>
-                        <span style={{ color: "var(--dim)", fontSize: 12 }}>{event.teamName}</span>
-                      </div>
-                      <div style={{ color: "var(--text)", fontSize: 13, marginTop: 2 }}>{eventText(event) || event.detail || "No detail"}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section>
             <div className="wc-eyebrow" style={{ marginBottom: 10 }}>LINEUPS</div>
-            {!game.lineups?.length ? (
-              <div style={{ color: "var(--dim)", fontSize: 13 }}>Lineups will appear when the provider publishes them.</div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20 }}>
-                {game.lineups.map((lineup) => <LineupColumn key={lineup.teamName} lineup={lineup} />)}
-              </div>
-            )}
+            <LineupsSection lineups={game.lineups} />
           </section>
 
           <section>
@@ -445,6 +664,39 @@ function MatchDetailDialog({ game, onClose }: { game: Game; onClose: () => void 
                     <span className="wc-num" style={{ textAlign: "left", fontWeight: 700 }}>{valueLabel(row.a)}</span>
                     <span style={{ textAlign: "center", color: "var(--dim)" }}>{type}</span>
                     <span className="wc-num" style={{ textAlign: "right", fontWeight: 700 }}>{valueLabel(row.b)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <div className="wc-eyebrow" style={{ marginBottom: 10 }}>MINUTE BY MINUTE</div>
+            {timeline.length === 0 ? (
+              <div style={{ color: "var(--dim)", fontSize: 13 }}>No match events published yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {timeline.map((event) => (
+                  <div
+                    key={event.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "30px 46px 1fr",
+                      gap: 10,
+                      alignItems: "start",
+                      padding: "9px 0",
+                      borderBottom: "1px solid var(--line)",
+                    }}
+                  >
+                    <ActivityIcon event={event} />
+                    <span className="wc-num" style={{ color: "var(--lime-ink)", fontWeight: 700 }}>{minuteLabel(event) || "-"}</span>
+                    <div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+                        <strong style={{ fontSize: 13.5 }}>{eventLabel(event)}</strong>
+                        <span style={{ color: "var(--dim)", fontSize: 12 }}>{event.teamName}</span>
+                      </div>
+                      <div style={{ color: "var(--text)", fontSize: 13, marginTop: 2 }}>{eventText(event) || event.detail || "No detail"}</div>
+                    </div>
                   </div>
                 ))}
               </div>
