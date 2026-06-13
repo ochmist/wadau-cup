@@ -50,6 +50,7 @@ type NavItem = { label: string; href: string };
 const DESKTOP_NAV: NavItem[] = [
   { label: "Leaderboard", href: "/" },
   { label: "Fixtures", href: "/fixtures" },
+  { label: "Banter", href: "/banter" },
   { label: "Rules", href: "/rules" },
   { label: "Draft", href: "/draft" },
   { label: "My Picks", href: "/my-picks" },
@@ -60,6 +61,7 @@ const DESKTOP_NAV: NavItem[] = [
 const BOTTOM_NAV: { label: string; href: string; d: string }[] = [
   { label: "Table", href: "/", d: "M3 5h14M3 10h14M3 15h14" },
   { label: "Fixtures", href: "/fixtures", d: "M4 5h12M6 3v4M14 3v4M5 9h3M11 9h4M5 13h3M11 13h4" },
+  { label: "Banter", href: "/banter", d: "M3 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H8l-4 4V5z" },
   { label: "Rules", href: "/rules", d: "M5 3h8l2 2v12H5zM8 8h4M8 11h4M8 14h3" },
   { label: "Draft", href: "/draft", d: "M10 3v14M3 10h14" },
   { label: "Picks", href: "/my-picks", d: "M5 4h10v12l-5-3-5 3z" },

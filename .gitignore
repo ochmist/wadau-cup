@@ -14,3 +14,6 @@ next-env.d.ts
 serviceAccount*.json
 *.service-account.json
 .emulator-data
+
+# Claude Design handoff bundle (local reference only)
+.design-handoff/
