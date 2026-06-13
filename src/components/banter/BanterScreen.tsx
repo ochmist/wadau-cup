@@ -74,6 +74,7 @@ function ReactionRow({
   busy,
   onReact,
   replyId,
+  compact = false,
 }: {
   id: string;
   targetType: "post" | "reply" | "event";
@@ -81,10 +82,19 @@ function ReactionRow({
   busy: string | null;
   onReact: (id: string, reaction: BanterReactionKey, targetType: "post" | "reply" | "event", replyId?: string) => void;
   replyId?: string;
+  compact?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const visibleReactions = reactions.filter((reaction) => reaction.count > 0 || reaction.mine);
+
+  function choose(reaction: BanterReactionKey) {
+    onReact(id, reaction, targetType, replyId);
+    setOpen(false);
+  }
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, flexWrap: "wrap" }}>
-      {reactions.map((reaction) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: compact ? 0 : 9, flexWrap: "wrap" }}>
+      {visibleReactions.map((reaction) => (
         <button
           key={reaction.key}
           type="button"
@@ -97,6 +107,28 @@ function ReactionRow({
           {reaction.count}
         </button>
       ))}
+      <span className="wc-bt-picker-wrap">
+        <button
+          type="button"
+          className="wc-bt-add"
+          onClick={() => setOpen((current) => !current)}
+          aria-label="Add reaction"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M5.6 9.2a3 3 0 0 0 4.8 0M6 6.4h.01M10 6.4h.01" />
+          </svg>
+        </button>
+        {open && (
+          <span className="wc-bt-picker">
+            {BANTER_REACTIONS.map((reaction) => (
+              <button key={reaction.key} type="button" onClick={() => choose(reaction.key)} aria-label={reaction.label}>
+                {reaction.emoji}
+              </button>
+            ))}
+          </span>
+        )}
+      </span>
     </div>
   );
 }
@@ -117,7 +149,7 @@ function BanterReply({
       <BtAvatar short={reply.short} active={reply.isMine} size={26} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "-0.01em" }}>{reply.isMine ? "You" : reply.name}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "-0.01em" }}>{reply.name}</span>
           <span className="wc-num" style={{ fontSize: 10, color: "var(--faint)" }}>{timeAgo(reply.createdAt)}</span>
         </div>
         <div style={{ fontSize: 13.5, lineHeight: 1.45, marginTop: 3, color: "var(--text)" }}>
@@ -207,9 +239,8 @@ function BanterMessage({
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: "-0.01em" }}>
-            {post.isMine ? "You" : post.name}
+            {post.name}
           </span>
-          {post.isMine && <span className="wc-tag-you">You</span>}
           <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)" }}>
             {timeAgo(post.createdAt)}
           </span>
@@ -270,35 +301,25 @@ function BanterEvent({
 }) {
   const colors = eventColors(item.accent);
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "9px 0" }}>
-      <div className="wc-card" style={{ width: "100%", maxWidth: 600, padding: "13px 15px 12px", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: colors.line }} />
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
-          <div
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 9,
-              flex: "none",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 15,
-              background: colors.soft,
-              border: "1px solid " + colors.line,
-            }}
-          >
-            {item.icon}
-          </div>
-          <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-            <span className="wc-num" style={{ position: "absolute", top: 1, right: 0, fontSize: 10.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
-              {timeAgo(item.occurredAt)}
-            </span>
-            <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: "-0.01em", lineHeight: 1.3, paddingRight: 64 }}>{item.title}</div>
-            <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 4, lineHeight: 1.45 }}>{item.sub}</div>
-            <ReactionRow id={item.id} targetType="event" reactions={item.reactions} busy={busyReaction} onReact={onReact} />
-          </div>
-        </div>
+    <div style={{ display: "flex", justifyContent: "center", padding: "7px 0" }}>
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          maxWidth: "100%",
+          border: "1px solid var(--line)",
+          background: colors.soft,
+          borderRadius: 999,
+          padding: "6px 10px",
+        }}
+      >
+        <span style={{ fontSize: 14, lineHeight: 1 }}>{item.icon}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {item.title}
+        </span>
+        <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", whiteSpace: "nowrap" }}>{timeAgo(item.occurredAt)}</span>
+        <ReactionRow id={item.id} targetType="event" reactions={item.reactions} busy={busyReaction} onReact={onReact} compact />
       </div>
     </div>
   );
@@ -355,7 +376,7 @@ function BanterComposer({
         >
           <input
             className="wc-bt-input"
-            placeholder="Drop your take..."
+            placeholder="Unasemaje..."
             value={body}
             maxLength={280}
             onChange={(event) => setBody(event.target.value)}

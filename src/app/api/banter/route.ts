@@ -14,7 +14,7 @@ import {
   type BanterReplyView,
 } from "@/lib/banter";
 import { T } from "@/lib/data";
-import type { FixtureDoc, MatchEventDoc, PlayerDoc, ResultDoc } from "@/lib/types";
+import type { FixtureDoc, PlayerDoc, ResultDoc } from "@/lib/types";
 
 type ReactionMap = Partial<Record<BanterReactionKey, string[]>>;
 
@@ -37,6 +37,21 @@ function timestampIso(value: unknown, fallback = new Date()) {
   }
   if (typeof value === "string" && !Number.isNaN(Date.parse(value))) return new Date(value).toISOString();
   return fallback.toISOString();
+}
+
+function timestampMs(value: unknown) {
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value && typeof value === "object" && "toMillis" in value && typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return value.toDate().getTime();
+  }
+  if (typeof value === "string") {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  return 0;
 }
 
 function authToken(req: NextRequest) {
@@ -104,11 +119,19 @@ function serializeReply(doc: FirebaseFirestore.QueryDocumentSnapshot, uid: strin
   };
 }
 
-async function serializePost(doc: FirebaseFirestore.QueryDocumentSnapshot, uid: string, isAdmin: boolean): Promise<BanterMessageView> {
+async function serializePost(
+  doc: FirebaseFirestore.QueryDocumentSnapshot,
+  uid: string,
+  isAdmin: boolean,
+  lastSeenMs: number,
+): Promise<BanterMessageView> {
   const data = docData<BanterPostDoc>(doc);
   const reactions = serializeReactions(data.reactions, uid);
   const repliesSnap = await doc.ref.collection("replies").orderBy("createdAt", "asc").limit(40).get();
   const replies = repliesSnap.docs.map((reply) => serializeReply(reply, uid));
+  const unreadReplyCount = data.uid === uid
+    ? repliesSnap.docs.filter((reply) => reply.get("uid") !== uid && timestampMs(reply.get("createdAt")) > lastSeenMs).length
+    : 0;
   return {
     type: "message",
     id: doc.id,
@@ -122,6 +145,7 @@ async function serializePost(doc: FirebaseFirestore.QueryDocumentSnapshot, uid: 
     reactionTotal: reactionTotal(reactions),
     replies,
     replyCount: replies.length,
+    unreadReplyCount,
     isMine: data.uid === uid,
     canDelete: isAdmin || data.uid === uid,
   };
@@ -140,42 +164,12 @@ function safeId(value: string) {
   return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
 }
 
-function eventIcon(event: MatchEventDoc) {
-  if (event.type === "goal") return "⚽";
-  if (event.type === "card") return event.detail?.toLowerCase().includes("red") ? "🟥" : "🟨";
-  if (event.type === "substitution") return "🔁";
-  if (event.type === "var") return "📺";
-  return "•";
-}
-
-function eventAccent(event: MatchEventDoc): BanterEventView["accent"] {
-  if (event.type === "goal") return "lime";
-  if (event.type === "card") return event.detail?.toLowerCase().includes("red") ? "down" : "gold";
-  if (event.type === "var") return "violet";
-  return "neutral";
-}
-
-function eventTitle(fixture: FixtureDoc, event: MatchEventDoc) {
-  const player = event.player || "Match event";
-  if (event.type === "goal") return `${player} scores for ${event.teamName}`;
-  if (event.type === "card") return `${player} booked for ${event.teamName}`;
-  if (event.type === "substitution") return `${event.teamName} substitution`;
-  if (event.type === "var") return `VAR check: ${event.detail || event.teamName}`;
-  return `${event.teamName}: ${event.detail || "match event"}`;
-}
-
-function eventSub(fixture: FixtureDoc, event: MatchEventDoc) {
-  const minute = event.minute == null ? "" : `${event.minute}${event.extra ? `+${event.extra}` : ""}' · `;
-  const assist = event.assist ? ` · Assist: ${event.assist}` : "";
-  return `${minute}${fixture.round}${fixture.group ? ` · Group ${fixture.group}` : ""}${assist}`;
-}
-
 function resultEvent(result: ResultDoc, fixture?: FixtureDoc): Omit<BanterEventView, "reactions" | "reactionTotal"> {
   const aName = teamName(result.a, fixture?.aName);
   const bName = teamName(result.b, fixture?.bName);
   const aFlag = teamFlag(result.a);
   const bFlag = teamFlag(result.b);
-  const score = result.sa == null || result.sb == null ? "Result entered" : `${aFlag} ${aName} ${result.sa}-${result.sb} ${bName} ${bFlag}`.trim();
+  const score = result.sa == null || result.sb == null ? `${aName} vs ${bName}` : `${aFlag} ${aName} ${result.sa}-${result.sb} ${bName} ${bFlag}`.trim();
   const points = (result.pts ?? [])
     .filter((row) => row.points > 0)
     .map((row) => `${teamName(row.code)} +${row.points}`)
@@ -187,26 +181,27 @@ function resultEvent(result: ResultDoc, fixture?: FixtureDoc): Omit<BanterEventV
     icon: result.win === "draw" ? "🤝" : "🏁",
     accent: "gold",
     title: score,
-    sub: [result.round, points || result.note].filter(Boolean).join(" · "),
+    sub: points || result.round,
     occurredAt: timestampIso(result.enteredAt, fallbackDate),
   };
 }
 
-function fixtureEvents(fixture: FixtureDoc): Array<Omit<BanterEventView, "reactions" | "reactionTotal">> {
-  const kickoff = fixture.kickoffAt ? new Date(fixture.kickoffAt) : new Date();
-  return (fixture.events ?? []).slice(-30).map((event, index) => {
-    const minute = event.minute ?? index;
-    const occurredAt = new Date(kickoff.getTime() + Math.max(minute, 0) * 60_000);
-    return {
-      type: "event",
-      id: safeId(`fixture-${fixture.id}-${event.id || index}`),
-      icon: eventIcon(event),
-      accent: eventAccent(event),
-      title: eventTitle(fixture, event),
-      sub: eventSub(fixture, event),
-      occurredAt: occurredAt.toISOString(),
-    };
-  });
+function topLevelFixtureEvent(fixture: FixtureDoc): Omit<BanterEventView, "reactions" | "reactionTotal"> | null {
+  if (fixture.status !== "live" && fixture.status !== "finished") return null;
+  const a = teamName(fixture.a, fixture.aName);
+  const b = teamName(fixture.b, fixture.bName);
+  const aFlag = teamFlag(fixture.a);
+  const bFlag = teamFlag(fixture.b);
+  const score = fixture.status === "finished" ? "FT" : "Live";
+  return {
+    type: "event",
+    id: safeId(`fixture-state-${fixture.id}-${fixture.status}`),
+    icon: fixture.status === "finished" ? "🏁" : "🟢",
+    accent: fixture.status === "finished" ? "gold" : "lime",
+    title: `${score} · ${aFlag} ${a} vs ${b} ${bFlag}`.trim(),
+    sub: `${fixture.round}${fixture.group ? ` · Group ${fixture.group}` : ""}`,
+    occurredAt: timestampIso(fixture.lastSyncedAt, fixture.kickoffAt ? new Date(fixture.kickoffAt) : new Date()),
+  };
 }
 
 function hydrateEventReactions(
@@ -227,7 +222,8 @@ export async function GET(req: NextRequest) {
     const session = await requireBanterUser(req);
     if ("error" in session) return session.error;
 
-    const [postsSnap, playersSnap, fixturesSnap, resultsSnap, eventReactionSnap] = await Promise.all([
+    const userMetaRef = adminDb!.doc(`pools/${POOL_ID}/banterMeta/seen-${session.uid}`);
+    const [postsSnap, playersSnap, fixturesSnap, resultsSnap, eventReactionSnap, userMetaSnap] = await Promise.all([
       adminDb!
         .collection(`pools/${POOL_ID}/banter`)
         .orderBy("createdAt", "desc")
@@ -237,26 +233,34 @@ export async function GET(req: NextRequest) {
       adminDb!.collection(`pools/${POOL_ID}/fixtures`).get(),
       adminDb!.collection(`pools/${POOL_ID}/results`).get(),
       adminDb!.collection(`pools/${POOL_ID}/banterEventReactions`).get(),
+      userMetaRef.get(),
     ]);
 
-    const posts = (await Promise.all(postsSnap.docs.map((doc) => serializePost(doc, session.uid, session.isAdmin)))).reverse();
+    const lastSeenMs = timestampMs(userMetaSnap.get("lastSeenAt"));
+    const posts = (await Promise.all(postsSnap.docs.map((doc) => serializePost(doc, session.uid, session.isAdmin, lastSeenMs)))).reverse();
     const fixtures = new Map(fixturesSnap.docs.map((snap) => [snap.id, snap.data() as FixtureDoc]));
     const eventReactions = new Map(eventReactionSnap.docs.map((snap) => [snap.id, (snap.get("reactions") ?? {}) as ReactionMap]));
     const resultEvents = resultsSnap.docs.map((snap) => resultEvent({ ...(snap.data() as ResultDoc), id: snap.id }, fixtures.get(snap.id)));
-    const matchEvents = fixturesSnap.docs.flatMap((snap) => fixtureEvents({ ...(snap.data() as FixtureDoc), id: snap.id }));
+    const matchEvents = fixturesSnap.docs
+      .map((snap) => topLevelFixtureEvent({ ...(snap.data() as FixtureDoc), id: snap.id }))
+      .filter((event): event is Omit<BanterEventView, "reactions" | "reactionTotal"> => !!event);
     const events = [...resultEvents, ...matchEvents]
       .map((event) => hydrateEventReactions(event, eventReactions, session.uid))
       .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
-      .slice(-120);
+      .slice(-60);
 
     const items: BanterFeedItem[] = [...events, ...posts]
       .sort((a, b) => Date.parse(a.type === "event" ? a.occurredAt : a.createdAt) - Date.parse(b.type === "event" ? b.occurredAt : b.createdAt))
-      .slice(-160);
+      .slice(-120);
+    const notificationCount = posts.reduce((sum, post) => sum + post.unreadReplyCount, 0);
+
+    await userMetaRef.set({ lastSeenAt: FieldValue.serverTimestamp() }, { merge: true });
 
     const body: BanterFeedView = {
       items,
       posts,
       memberCount: playersSnap.size,
+      notificationCount,
       me: {
         uid: session.uid,
         name: session.player.name,
@@ -326,7 +330,7 @@ export async function POST(req: NextRequest) {
     await batch.commit();
 
     const saved = await postRef.get();
-    return NextResponse.json({ post: await serializePost(saved as FirebaseFirestore.QueryDocumentSnapshot, session.uid, session.isAdmin) });
+    return NextResponse.json({ post: await serializePost(saved as FirebaseFirestore.QueryDocumentSnapshot, session.uid, session.isAdmin, Date.now()) });
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }

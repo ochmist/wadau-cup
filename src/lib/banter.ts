@@ -42,6 +42,7 @@ export type BanterMessageView = {
   reactionTotal: number;
   replies: BanterReplyView[];
   replyCount: number;
+  unreadReplyCount: number;
   isMine: boolean;
   canDelete: boolean;
 };
@@ -66,6 +67,7 @@ export type BanterFeedView = {
   items: BanterFeedItem[];
   posts: BanterMessageView[];
   memberCount: number;
+  notificationCount: number;
   me: {
     uid: string;
     name: string;

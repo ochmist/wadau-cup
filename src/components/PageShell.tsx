@@ -7,7 +7,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Crest, ThemeToggle } from "@/components/ds";
 import { AppGuard } from "@/components/AppGuard";
 import { useAuth } from "@/lib/auth";
@@ -81,6 +81,7 @@ function stageStatus(round: string, group?: string | null) {
 export function PageShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/";
   const { user, isAdmin, hasDrafted } = useAuth();
+  const [banterCount, setBanterCount] = useState(0);
   const { player } = useMyData();
   const { round } = usePool();
   const { fixtures, liveState } = useFixtures();
@@ -114,6 +115,32 @@ export function PageShell({ children }: { children: ReactNode }) {
     return round ? `Status · ${stageLabel(round)}` : "Status · Fixtures";
   }, [fixtures, liveState, round]);
   const isLiveStatus = statusPill.startsWith("Live ·");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBanterNotifications() {
+      if (!user || !hasDrafted) {
+        setBanterCount(0);
+        return;
+      }
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/banter/notifications", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (!cancelled && res.ok) setBanterCount(Number(data.count) || 0);
+      } catch {
+        if (!cancelled) setBanterCount(0);
+      }
+    }
+    loadBanterNotifications();
+    const id = setInterval(loadBanterNotifications, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [hasDrafted, user, pathname]);
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
@@ -156,6 +183,9 @@ export function PageShell({ children }: { children: ReactNode }) {
               className={"wc-nav-link" + (isActive(pathname, item.href) ? " active" : "")}
             >
               {item.label}
+              {item.href === "/banter" && banterCount > 0 && (
+                <span className="wc-nav-badge">{banterCount > 9 ? "9+" : banterCount}</span>
+              )}
             </Link>
           ))}
         </div>
@@ -239,6 +269,7 @@ export function PageShell({ children }: { children: ReactNode }) {
               href={item.href}
               style={{
                 flex: "0 0 68px",
+                position: "relative",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -262,6 +293,9 @@ export function PageShell({ children }: { children: ReactNode }) {
               <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 500, letterSpacing: "0.01em" }}>
                 {item.label}
               </span>
+              {item.href === "/banter" && banterCount > 0 && (
+                <span className="wc-nav-badge mobile">{banterCount > 9 ? "9+" : banterCount}</span>
+              )}
             </Link>
           );
         })}
