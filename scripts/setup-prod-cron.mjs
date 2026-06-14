@@ -109,12 +109,12 @@ const jobs = [
   {
     name: "wadau-fixtures-daily",
     schedule: "5 6 * * *",
-    uri: `${baseUrl}/api/admin/sync-results?force=1`,
+    uri: `${baseUrl}/api/admin/sync-results?mode=fixtures&force=1`,
   },
   {
     name: "wadau-results-poll",
     schedule: "* * * * *",
-    uri: `${baseUrl}/api/admin/sync-results`,
+    uri: `${baseUrl}/api/admin/sync-results?mode=live`,
   },
 ];
 

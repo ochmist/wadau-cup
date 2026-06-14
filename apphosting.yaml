@@ -83,7 +83,7 @@ env:
     availability:
       - RUNTIME
   - variable: API_FOOTBALL_DAILY_CAP
-    value: "6500"
+    value: "7500"
     availability:
       - RUNTIME
   - variable: SYNC_CRON_SECRET

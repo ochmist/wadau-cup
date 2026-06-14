@@ -6,6 +6,8 @@
    as played: final score + FT, winner emphasised, loser dimmed/grayscale. */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { LiveMarker } from "@/components/LiveMarker";
 import { PageHead } from "@/components/ui";
 import { T } from "@/lib/data";
 import { fixtureStageLabel, stageLabel } from "@/lib/fixtures";
@@ -64,8 +66,12 @@ function localDateKey(g: Pick<Game, "date" | "time" | "kickoffAt">) {
 
 function dayLabel(g: Pick<Game, "date" | "time" | "kickoffAt">) {
   const parsed = localKickoffDate(g);
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startOfParsed = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+  const dayOffset = Math.round((startOfParsed - startOfToday) / 86_400_000);
   return {
-    day: parsed.toLocaleDateString([], { weekday: "long" }),
+    day: dayOffset === 0 ? "Today" : dayOffset === 1 ? "Tomorrow" : parsed.toLocaleDateString([], { weekday: "long" }),
     date: parsed.toLocaleDateString([], { month: "short", day: "numeric" }),
   };
 }
@@ -81,6 +87,16 @@ function clockLabel(g: Game) {
   if (g.statusShort === "FT" || g.status === "finished") return "FT";
   if (typeof g.minute === "number") return `${g.minute}${typeof g.extra === "number" && g.extra > 0 ? `+${g.extra}` : ""}'`;
   return g.statusLong ?? "LIVE";
+}
+
+function liveMarkerLabel(g: Game) {
+  if (typeof g.minute === "number") return clockLabel(g);
+  const kickoff = g.kickoffAt ? Date.parse(g.kickoffAt) : Number.NaN;
+  if (!Number.isNaN(kickoff)) {
+    const elapsed = Math.max(1, Math.floor((Date.now() - kickoff) / 60_000) + 1);
+    if (elapsed > 0 && elapsed < 130) return `${elapsed}'`;
+  }
+  return clockLabel(g);
 }
 
 function minuteLabel(event: MatchEventDoc) {
@@ -169,7 +185,7 @@ function ScorerLine({ label, events, align }: { label: string; events: MatchEven
   );
 }
 
-function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; onOpen: () => void }) {
+function FixtureCard({ g, mineCodes, href }: { g: Game; mineCodes: string[]; href: string }) {
   const aMine = Boolean(g.a && mineCodes.includes(g.a));
   const bMine = Boolean(g.b && mineCodes.includes(g.b));
   const played = isFinal(g);
@@ -181,16 +197,15 @@ function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; o
   const bScorers = teamScorers(g.events, g.b);
 
   return (
-    <button
-      type="button"
+    <Link
+      href={href}
       className="wc-card"
-      onClick={onOpen}
       style={{
         width: "100%",
-        appearance: "none",
         display: "block",
         font: "inherit",
         color: "var(--text)",
+        textDecoration: "none",
         textAlign: "left",
         padding: "13px 16px",
         border: "1px solid " + (aMine || bMine ? "var(--lime-line)" : "var(--line)"),
@@ -201,12 +216,17 @@ function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; o
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        {played ? (
+        {g.status === "live" ? (
+          <LiveMarker
+            fixture
+            label={liveMarkerLabel(g)}
+            minute={g.minute}
+            extra={g.extra}
+            statusShort={g.statusShort}
+            statusLong={g.statusLong}
+          />
+        ) : played ? (
           <span className="wc-num" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", color: "var(--faint)" }}>
-            {clockLabel(g)}
-          </span>
-        ) : g.status === "live" ? (
-          <span className="wc-num" style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.08em", color: "var(--lime-ink)" }}>
             {clockLabel(g)}
           </span>
         ) : (
@@ -214,9 +234,11 @@ function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; o
             {kickoffLabel(g)}
           </span>
         )}
-        <span className="wc-pill" style={{ padding: "2px 8px", fontSize: 9 }}>
-          {g.status === "live" ? "LIVE" : fixtureStageLabel(g.round, g.group)}
-        </span>
+        {g.status !== "live" && (
+          <span className="wc-pill" style={{ padding: "2px 8px", fontSize: 9 }}>
+            {fixtureStageLabel(g.round, g.group)}
+          </span>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <FixtureSide code={g.a} label={g.aName} mine={aMine} align="left" state={aState} />
@@ -260,7 +282,7 @@ function FixtureCard({ g, mineCodes, onOpen }: { g: Game; mineCodes: string[]; o
           {g.warning}
         </div>
       )}
-    </button>
+    </Link>
   );
 }
 
@@ -629,7 +651,21 @@ function MatchDetailDialog({ game, onClose }: { game: Game; onClose: () => void 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
             <div>
               <div className="wc-eyebrow" style={{ marginBottom: 7 }}>
-                {game.status === "live" ? clockLabel(game) : kickoffLabel(game)} · {fixtureStageLabel(game.round, game.group)}
+                {game.status === "live" ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <LiveMarker
+                      fixture
+                      label={liveMarkerLabel(game)}
+                      minute={game.minute}
+                      extra={game.extra}
+                      statusShort={game.statusShort}
+                      statusLong={game.statusLong}
+                    />
+                    <span>{fixtureStageLabel(game.round, game.group)}</span>
+                  </span>
+                ) : (
+                  <>{kickoffLabel(game)} · {fixtureStageLabel(game.round, game.group)}</>
+                )}
               </div>
               <h2 style={{ margin: 0, fontSize: 21 }}>{title}</h2>
               {game.venue && <div style={{ marginTop: 5, color: "var(--dim)", fontSize: 13 }}>{game.venue}</div>}
@@ -737,7 +773,6 @@ export function FixturesScreen() {
   const mineCodes = enrichPlayerTeams(player).map((t) => t.code);
   const [filter, setFilter] = useState<Filter>("Upcoming");
   const [stageFilter, setStageFilter] = useState<StageFilter>("All stages");
-  const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const resultById = useMemo(() => new Map(results.map((result) => [result.id, result])), [results]);
   const liveById = useMemo(() => new Map(liveState.map((state) => [state.fixtureId, state])), [liveState]);
   const allGames = useMemo<Game[]>(() => fixtures.map((fixture) => {
@@ -820,14 +855,13 @@ export function FixturesScreen() {
               </div>
               <div className="wc-fixture-grid">
                 {d.games.map((g) => (
-                  <FixtureCard key={g.id} g={g} mineCodes={mineCodes} onOpen={() => setSelectedGame(g)} />
+                  <FixtureCard key={g.id} g={g} mineCodes={mineCodes} href={`/fixtures/${encodeURIComponent(g.id)}`} />
                 ))}
               </div>
             </div>
           ))}
         </div>
       )}
-      {selectedGame && <MatchDetailDialog game={selectedGame} onClose={() => setSelectedGame(null)} />}
     </div>
   );
 }

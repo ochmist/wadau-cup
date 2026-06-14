@@ -6,6 +6,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { useAuth } from "@/lib/auth";
 import { Btn, ConfirmDialog, PageHead, SectionLabel } from "@/components/ui";
 import { ACCOUNTS, AdminInput, AdminToggle, PENDING_JOINS, StatusPill } from "@/components/admin/parts";
@@ -254,16 +255,42 @@ function AccountActions({
   account,
   onDelete,
   onReset,
+  onSetAdmin,
 }: {
   account: AccountRow;
   onDelete: (account: AccountRow) => void;
   onReset: (account: AccountRow) => void;
+  onSetAdmin: (account: AccountRow) => void;
 }) {
   const currentUid = auth.currentUser?.uid;
   const canDelete = "uid" in account && account.uid !== currentUid;
   const canReset = "uid" in account;
+  const canChangeAdmin = "uid" in account && (account.uid !== currentUid || !account.isAdmin);
   return (
     <div style={{ display: "flex", justifyContent: "flex-start", gap: 8, flexWrap: "wrap" }}>
+      {"uid" in account && (
+        <button
+          onClick={() => {
+            if (canChangeAdmin) onSetAdmin(account);
+          }}
+          disabled={!canChangeAdmin}
+          style={{
+            background: account.isAdmin ? "var(--lime-soft)" : "none",
+            border: `1px solid ${account.isAdmin ? "var(--lime-line)" : "var(--line-2)"}`,
+            borderRadius: 8,
+            padding: "6px 10px",
+            color: account.isAdmin ? "var(--lime-ink)" : "var(--dim)",
+            fontFamily: "inherit",
+            fontSize: 11.5,
+            fontWeight: 600,
+            cursor: canChangeAdmin ? "pointer" : "not-allowed",
+            opacity: canChangeAdmin ? 1 : 0.5,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {account.isAdmin ? "Demote" : "Promote"}
+        </button>
+      )}
       <button
         onClick={() => {
           if (canReset) onReset(account);
@@ -318,15 +345,17 @@ function AccountsTable({
   updatingPaidUid,
   onDelete,
   onReset,
+  onSetAdmin,
   onTogglePaid,
 }: {
   accounts: AccountRow[];
   updatingPaidUid: string | null;
   onDelete: (account: AccountRow) => void;
   onReset: (account: AccountRow) => void;
+  onSetAdmin: (account: AccountRow) => void;
   onTogglePaid: (account: AccountRow) => void;
 }) {
-  const desktopColumns = "minmax(220px, 1fr) 112px 54px 145px";
+  const desktopColumns = "minmax(220px, 1fr) 112px 54px 220px";
   const desktopGap = 12;
   return (
     <div className="wc-card" style={{ overflow: "hidden", padding: 0, minWidth: 0 }}>
@@ -379,7 +408,7 @@ function AccountsTable({
                 <span className="wc-num" style={{ fontSize: 12, color: "var(--faint)" }}>—</span>
               )}
             </div>
-            <AccountActions account={a} onDelete={onDelete} onReset={onReset} />
+            <AccountActions account={a} onDelete={onDelete} onReset={onReset} onSetAdmin={onSetAdmin} />
           </div>
           {/* mobile */}
           <div
@@ -414,6 +443,27 @@ function AccountsTable({
                   onClick={() => onTogglePaid(a)}
                   label={a.paid ? `Mark ${a.name} unpaid` : `Mark ${a.name} paid`}
                 />
+              )}
+              {"uid" in a && (
+                <button
+                  onClick={() => onSetAdmin(a)}
+                  className="wc-iconbtn"
+                  aria-label={a.isAdmin ? `Demote ${a.name} from admin` : `Promote ${a.name} to admin`}
+                  title={a.isAdmin ? `Demote ${a.name} from admin` : `Promote ${a.name} to admin`}
+                  disabled={a.uid === auth.currentUser?.uid && a.isAdmin}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    color: a.isAdmin ? "var(--lime-ink)" : "var(--dim)",
+                    borderColor: a.isAdmin ? "var(--lime-line)" : undefined,
+                    opacity: a.uid === auth.currentUser?.uid && a.isAdmin ? 0.45 : 1,
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 2.5 14 4v4.2c0 3-1.9 5.7-5 7.3-3.1-1.6-5-4.3-5-7.3V4l5-1.5Z" />
+                    {a.isAdmin && <path d="m6.8 9 1.4 1.4 3-3.2" />}
+                  </svg>
+                </button>
               )}
               {"uid" in a && (
                 <button
@@ -475,6 +525,10 @@ function PlayerAccounts() {
   const [resetTempPassword, setResetTempPassword] = useState<string | null>(null);
   const [updatingPaidUid, setUpdatingPaidUid] = useState<string | null>(null);
   const [paidError, setPaidError] = useState<string | null>(null);
+  const [adminTarget, setAdminTarget] = useState<AccountRow | null>(null);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [updatingAdmin, setUpdatingAdmin] = useState(false);
 
   useEffect(() => {
     if (!FIREBASE_CONFIGURED) return;
@@ -576,6 +630,46 @@ function PlayerAccounts() {
     }
   }, [updatingPaidUid]);
 
+  const setAdminRole = useCallback(async () => {
+    if (!adminTarget || !("uid" in adminTarget) || !auth.currentUser?.email) return;
+    if (!adminPassword) {
+      setAdminError("Enter your admin password.");
+      return;
+    }
+    const nextIsAdmin = !adminTarget.isAdmin;
+    setUpdatingAdmin(true);
+    setAdminError(null);
+    try {
+      const credential = EmailAuthProvider.credential(auth.currentUser.email, adminPassword);
+      await reauthenticateWithCredential(auth.currentUser, credential);
+      await auth.currentUser.getIdToken(true);
+      const headers = await authHeader();
+      const res = await fetch("/api/admin/set-admin", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ uid: adminTarget.uid, isAdmin: nextIsAdmin }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Failed to update admin role.");
+      }
+      setAccounts((current) => current.map((row) => (
+        accountKey(row) === accountKey(adminTarget) ? { ...row, isAdmin: nextIsAdmin } : row
+      )));
+      setAdminTarget(null);
+      setAdminPassword("");
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      setAdminError(
+        code === "auth/invalid-credential" || code === "auth/wrong-password"
+          ? "Incorrect admin password."
+          : (error as Error).message,
+      );
+    } finally {
+      setUpdatingAdmin(false);
+    }
+  }, [adminPassword, adminTarget]);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -605,8 +699,52 @@ function PlayerAccounts() {
               setResetError(null);
               setResetTempPassword(null);
             }}
+            onSetAdmin={(account) => {
+              setAdminTarget(account);
+              setAdminPassword("");
+              setAdminError(null);
+            }}
           />
         </>
+      )}
+      {adminTarget && "uid" in adminTarget && (
+        <ConfirmDialog
+          title={adminTarget.isAdmin ? `Demote ${adminTarget.name}?` : `Promote ${adminTarget.name}?`}
+          body={
+            adminTarget.isAdmin
+              ? "This removes admin access for this player. They will keep their player account."
+              : "This gives the player access to admin screens and admin actions."
+          }
+          confirmLabel={updatingAdmin ? "Updating…" : adminTarget.isAdmin ? "Demote" : "Promote"}
+          cancelLabel="Cancel"
+          tone="gold"
+          onConfirm={setAdminRole}
+          onClose={() => {
+            if (updatingAdmin) return;
+            setAdminTarget(null);
+            setAdminPassword("");
+            setAdminError(null);
+          }}
+        >
+          <div style={{ padding: "12px 13px", marginTop: 16, background: "var(--surface-2)", border: "1px solid var(--gold-line)", borderRadius: 12 }}>
+            <div className="wc-eyebrow wc-gold-text">Admin password</div>
+            <input
+              value={adminPassword}
+              onChange={(event) => setAdminPassword(event.target.value)}
+              type="password"
+              autoComplete="current-password"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void setAdminRole();
+                }
+              }}
+              style={{ width: "100%", fontFamily: "var(--mono)", fontSize: 14, fontWeight: 600, color: "var(--text)", background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: 10, padding: "10px 10px", outline: "none", marginTop: 8 }}
+            />
+            {adminError && <div style={{ fontSize: 12.5, color: "var(--down)", marginTop: 8 }}>{adminError}</div>}
+          </div>
+        </ConfirmDialog>
       )}
       {resetTarget && (
         <ConfirmDialog
@@ -803,9 +941,14 @@ export function AdminSetupScreen() {
         title="Pool setup & accounts"
         sub="Configure the pool and manage who can log in."
         right={
-          <Link href="/admin/results" className="wc-back-link">
-            Match results →
-          </Link>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <Link href="/admin" className="wc-back-link">
+              Data control
+            </Link>
+            <Link href="/admin/results" className="wc-back-link">
+              Match results →
+            </Link>
+          </div>
         }
       />
 

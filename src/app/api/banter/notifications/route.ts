@@ -32,10 +32,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const [playerSnap, seenSnap, ownPostsSnap, recentPostsSnap] = await Promise.all([
+    const [playerSnap, seenSnap, recentPostsSnap] = await Promise.all([
       adminDb.doc(`pools/${POOL_ID}/players/${decoded.uid}`).get(),
       adminDb.doc(`pools/${POOL_ID}/banterMeta/seen-${decoded.uid}`).get(),
-      adminDb.collection(`pools/${POOL_ID}/banter`).where("uid", "==", decoded.uid).limit(80).get(),
       adminDb.collection(`pools/${POOL_ID}/banter`).orderBy("createdAt", "desc").limit(80).get(),
     ]);
     if (!playerSnap.exists) {
@@ -46,9 +45,37 @@ export async function GET(req: NextRequest) {
     let count = recentPostsSnap.docs.filter((post) => (
       post.get("uid") !== decoded.uid && timestampMs(post.get("createdAt")) > lastSeenMs
     )).length;
-    await Promise.all(ownPostsSnap.docs.map(async (post) => {
+    await Promise.all(recentPostsSnap.docs.map(async (post) => {
+      const mentions = post.get("mentions");
+      if (
+        post.get("uid") !== decoded.uid &&
+        Array.isArray(mentions) &&
+        mentions.includes(decoded.uid) &&
+        timestampMs(post.get("createdAt")) > lastSeenMs
+      ) {
+        count += 1;
+      }
       const repliesSnap = await post.ref.collection("replies").orderBy("createdAt", "desc").limit(20).get();
-      count += repliesSnap.docs.filter((reply) => reply.get("uid") !== decoded.uid && timestampMs(reply.get("createdAt")) > lastSeenMs).length;
+      const userParticipated =
+        post.get("uid") === decoded.uid ||
+        (Array.isArray(mentions) && mentions.includes(decoded.uid)) ||
+        repliesSnap.docs.some((reply) => reply.get("uid") === decoded.uid && timestampMs(reply.get("createdAt")) <= lastSeenMs);
+      count += repliesSnap.docs.filter((reply) => {
+        const replyMentions = reply.get("mentions");
+        const isNew = reply.get("uid") !== decoded.uid && timestampMs(reply.get("createdAt")) > lastSeenMs;
+        return isNew && (userParticipated || (Array.isArray(replyMentions) && replyMentions.includes(decoded.uid)));
+      }).length;
+    }));
+
+    const eventThreadsSnap = await adminDb.collection(`pools/${POOL_ID}/banterEventReplies`).limit(80).get();
+    await Promise.all(eventThreadsSnap.docs.map(async (thread) => {
+      const repliesSnap = await thread.ref.collection("replies").orderBy("createdAt", "desc").limit(20).get();
+      const userParticipated = repliesSnap.docs.some((reply) => reply.get("uid") === decoded.uid && timestampMs(reply.get("createdAt")) <= lastSeenMs);
+      count += repliesSnap.docs.filter((reply) => {
+        const mentions = reply.get("mentions");
+        const isNew = reply.get("uid") !== decoded.uid && timestampMs(reply.get("createdAt")) > lastSeenMs;
+        return isNew && (userParticipated || (Array.isArray(mentions) && mentions.includes(decoded.uid)));
+      }).length;
     }));
 
     return NextResponse.json({ count });

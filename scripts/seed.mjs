@@ -25,9 +25,11 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
 const POOL_ID = process.env.NEXT_PUBLIC_POOL_ID ?? "default";
-const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "demo-wadau";
-const BUYIN = 1000;
 const IN_EMULATOR = !!process.env.FIRESTORE_EMULATOR_HOST;
+const PROJECT_ID = IN_EMULATOR
+  ? process.env.FIREBASE_EMULATOR_PROJECT_ID ?? process.env.NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID ?? "demo-wadau"
+  : process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "wadau-cup";
+const BUYIN = 1000;
 const WORLD_CUP_FIRST_KICKOFF_ISO = "2026-06-11T19:00:00.000Z";
 
 // ── Init ────────────────────────────────────────────────────────────────────

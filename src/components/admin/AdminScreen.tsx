@@ -298,7 +298,7 @@ export function AdminScreen() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Link href="/admin" className="wc-nav-link" style={{ color: "var(--lime-ink)", fontWeight: 600 }}>
-            ← Pool setup
+            ← Data control
           </Link>
         </div>
       </div>
@@ -320,12 +320,12 @@ export function AdminScreen() {
               {DataSync}
               {Recompute}
               <div className="wc-card" style={{ padding: "16px 18px" }}>
-                <SectionLabel>Player accounts</SectionLabel>
+                <SectionLabel>Admin tools</SectionLabel>
                 <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 8, lineHeight: 1.45 }}>
-                  Payments and account state now live in Pool setup.
+                  Pool settings and account management now live behind setup.
                 </div>
-                <Link href="/admin" className="wc-nav-link" style={{ display: "inline-flex", marginTop: 12, color: "var(--lime-ink)", fontWeight: 600 }}>
-                  Open Pool setup →
+                <Link href="/admin/setup" className="wc-nav-link" style={{ display: "inline-flex", marginTop: 12, color: "var(--lime-ink)", fontWeight: 600 }}>
+                  Open pool setup →
                 </Link>
               </div>
             </div>

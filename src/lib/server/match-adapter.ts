@@ -2,7 +2,9 @@ import { matchDataConfig } from "@/lib/config";
 import { GROUPS, T } from "@/lib/data";
 import { TEMP_FIXTURES, type FixtureGame } from "@/lib/fixtures";
 import { canonicalTeamId, isPlaceholderTeam, teamLabel, type ProviderTeam } from "@/lib/team-aliases";
-import type { MatchEventDoc, MatchLineupTeamDoc, MatchStatisticDoc, TeamProfileDoc } from "@/lib/types";
+import type { FixtureDoc, MatchEventDoc, MatchLineupTeamDoc, MatchStatisticDoc, TeamProfileDoc } from "@/lib/types";
+
+const MIN_COMPLETE_FIXTURE_COUNT = 64;
 
 export type NormalizedStatus = "scheduled" | "live" | "finished" | "postponed" | "abandoned" | "unknown";
 
@@ -67,6 +69,8 @@ export type MatchAdapterResult = {
     openfootball: boolean;
   };
 };
+
+export type StoredFixtureForSync = FixtureDoc & { id: string };
 
 type FootballDataTeam = ProviderTeam;
 type FootballDataMatch = {
@@ -842,6 +846,178 @@ function mergeApiFootballFixtures(primary: NormalizedFixture[], apiFixtures: Nor
   });
 }
 
+function normalizeStoredFixture(fixture: StoredFixtureForSync): NormalizedFixture {
+  return {
+    id: fixture.id,
+    label: fixture.label,
+    round: fixture.round,
+    group: fixture.group ?? null,
+    date: fixture.date,
+    time: fixture.time,
+    kickoffAt: fixture.kickoffAt,
+    venue: fixture.venue ?? null,
+    status: fixture.status,
+    a: fixture.a ?? null,
+    b: fixture.b ?? null,
+    aName: fixture.aName,
+    bName: fixture.bName,
+    source: fixture.source,
+    sourceIds: fixture.sourceIds ?? {},
+    warning: fixture.warning ?? null,
+    events: fixture.events ?? [],
+    lineups: fixture.lineups ?? [],
+    statistics: fixture.statistics ?? [],
+  };
+}
+
+function shouldPollStoredFixture(fixture: StoredFixtureForSync, resultIds: Set<string>, now = Date.now()) {
+  if (!fixture.sourceIds?.apiFootball) return false;
+  if (fixture.status === "live") return true;
+  if (!resultIds.has(fixture.id)) {
+    const kickoff = Date.parse(fixture.kickoffAt);
+    if (!Number.isNaN(kickoff) && now >= kickoff - 20 * 60 * 1000 && now <= kickoff + 36 * 60 * 60 * 1000) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizedApiFootballFixtureForStored(
+  stored: StoredFixtureForSync,
+  row: ApiFootballFixture,
+  proceedings: ApiFootballProceedings,
+): NormalizedFixture {
+  const round = roundFromApiFootball(row.league?.round);
+  const home = canonicalTeamId(row.teams?.home);
+  const away = canonicalTeamId(row.teams?.away);
+  const kickoffAt = row.fixture?.date ?? stored.kickoffAt;
+  const { date, time } = datePartsFromIso(kickoffAt);
+  const warning = !home || !away ? unresolvedTeamWarning(row.teams?.home, row.teams?.away) : null;
+  const next: NormalizedFixture = {
+    ...normalizeStoredFixture(stored),
+    round: round === "Unknown" ? stored.round : round,
+    date,
+    time,
+    kickoffAt,
+    venue: row.venue?.name ?? stored.venue ?? null,
+    status: statusFromApiFootball(row.fixture?.status?.short),
+    a: home ?? stored.a ?? null,
+    b: away ?? stored.b ?? null,
+    aName: home ? teamLabel(row.teams?.home) : stored.aName,
+    bName: away ? teamLabel(row.teams?.away) : stored.bName,
+    source: "api-football",
+    sourceIds: { ...stored.sourceIds, apiFootball: row.fixture?.id == null ? stored.sourceIds?.apiFootball : String(row.fixture.id) },
+    warning,
+    events: proceedings.events,
+    lineups: proceedings.lineups,
+    statistics: proceedings.statistics,
+  };
+  next.result = resultFromApiFootball(row, stored.id, next.round, next.a, next.b);
+  next.liveState = liveStateFromApiFootball(row, stored.id, proceedings);
+  return next;
+}
+
+async function fetchApiFootballFixtureById(stored: StoredFixtureForSync): Promise<{
+  fixture: NormalizedFixture | null;
+  warnings: AdapterWarning[];
+  calls: number;
+}> {
+  const apiId = stored.sourceIds?.apiFootball;
+  if (!apiId) return { fixture: null, warnings: [], calls: 0 };
+  const headers = { "x-apisports-key": matchDataConfig.apiFootballApiKey };
+  const data = await fetchJson(`${matchDataConfig.apiFootballBaseUrl}/fixtures?${new URLSearchParams({ id: apiId })}`, {
+    headers,
+  }) as { response?: ApiFootballFixture[]; errors?: unknown };
+  const warnings: AdapterWarning[] = [];
+  let calls = 1;
+  const providerError = providerErrorMessage(data.errors);
+  if (providerError) warnings.push({ provider: "api-football", matchId: stored.id, message: providerError });
+  const row = data.response?.[0];
+  if (!row) {
+    warnings.push({ provider: "api-football", matchId: stored.id, message: `No fixture returned for API-Football id ${apiId}.` });
+    return { fixture: null, warnings, calls };
+  }
+
+  let proceedings: ApiFootballProceedings = { events: [], lineups: [], statistics: [] };
+  if (["live", "finished"].includes(statusFromApiFootball(row.fixture?.status?.short))) {
+    try {
+      const result = await fetchApiFootballProceedings(apiId);
+      proceedings = { events: result.events, lineups: result.lineups, statistics: result.statistics };
+      calls += result.calls;
+      warnings.push(...result.warnings);
+    } catch (error) {
+      warnings.push({ provider: "api-football", matchId: stored.id, message: `Proceedings fetch failed: ${(error as Error).message}` });
+    }
+  }
+
+  const fixture = normalizedApiFootballFixtureForStored(stored, row, proceedings);
+  return { fixture, warnings, calls };
+}
+
+export async function getKnownFixtureUpdates(input: {
+  fixtures: StoredFixtureForSync[];
+  resultIds: Set<string>;
+  now?: number;
+}): Promise<MatchAdapterResult> {
+  const warnings: AdapterWarning[] = [];
+  let apiFootballCalls = 0;
+  const fixtures: NormalizedFixture[] = [];
+  const teamProfiles: TeamProfileDoc[] = [];
+
+  if (!matchDataConfig.enableLiveLayer || !matchDataConfig.apiFootballApiKey) {
+    return {
+      fixtures,
+      liveState: [],
+      teamProfiles,
+      apiFootballCalls,
+      warnings: [{ provider: "api-football", message: "Live layer is not configured." }],
+      providerConfigured: {
+        footballData: Boolean(matchDataConfig.footballDataApiKey),
+        apiFootball: Boolean(matchDataConfig.apiFootballApiKey && matchDataConfig.enableLiveLayer),
+        openfootball: Boolean(matchDataConfig.openfootballFixturesUrl),
+      },
+    };
+  }
+
+  const targets = input.fixtures.filter((fixture) => shouldPollStoredFixture(fixture, input.resultIds, input.now));
+  for (const target of targets) {
+    try {
+      const result = await fetchApiFootballFixtureById(target);
+      apiFootballCalls += result.calls;
+      warnings.push(...result.warnings);
+      if (result.fixture) fixtures.push(result.fixture);
+    } catch (error) {
+      warnings.push({ provider: "api-football", matchId: target.id, message: `Known fixture poll failed: ${(error as Error).message}` });
+    }
+  }
+
+  return {
+    fixtures,
+    liveState: fixtures.flatMap((fixture) => fixture.liveState ? [fixture.liveState] : []),
+    teamProfiles,
+    apiFootballCalls,
+    warnings,
+    providerConfigured: {
+      footballData: Boolean(matchDataConfig.footballDataApiKey),
+      apiFootball: Boolean(matchDataConfig.apiFootballApiKey && matchDataConfig.enableLiveLayer),
+      openfootball: Boolean(matchDataConfig.openfootballFixturesUrl),
+    },
+  };
+}
+
+function chooseCanonicalFixtures(input: {
+  footballFixtures: NormalizedFixture[];
+  apiFootballFixtures: NormalizedFixture[];
+  openfootballFixtures: NormalizedFixture[];
+}) {
+  const { footballFixtures, apiFootballFixtures, openfootballFixtures } = input;
+  if (footballFixtures.length) return mergeApiFootballFixtures(footballFixtures, apiFootballFixtures);
+  if (openfootballFixtures.length) return mergeApiFootballFixtures(openfootballFixtures, apiFootballFixtures);
+  if (apiFootballFixtures.length >= MIN_COMPLETE_FIXTURE_COUNT) return apiFootballFixtures;
+  if (apiFootballFixtures.length) return apiFootballFixtures;
+  return tempFixtures();
+}
+
 function crossCheckResults(primary: NormalizedFixture[], fallback: NormalizedFixture[]) {
   const byKey = new Map(fallback.map((fixture) => [fixtureKey(fixture.round, fixture.date, fixture.a, fixture.b), fixture.result]));
   const warnings: AdapterWarning[] = [];
@@ -961,13 +1137,7 @@ export async function getMatchAdapterState(options: { enableApiFootball?: boolea
     warnings.push({ provider: "openfootball", message: `Fetch failed: ${(error as Error).message}` });
   }
 
-  const fixtures = footballFixtures.length
-    ? mergeApiFootballFixtures(footballFixtures, apiFootballFixtures)
-    : apiFootballFixtures.length
-      ? apiFootballFixtures
-      : openfootballFixtures.length
-        ? openfootballFixtures
-        : tempFixtures();
+  const fixtures = chooseCanonicalFixtures({ footballFixtures, apiFootballFixtures, openfootballFixtures });
   if (matchDataConfig.requireCrossCheck && footballFixtures.length && openfootballFixtures.length) {
     const reconciliation = crossCheckResults(fixtures, openfootballFixtures);
     warnings.push(...reconciliation.warnings);

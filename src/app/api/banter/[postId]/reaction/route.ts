@@ -5,20 +5,24 @@ import { POOL_ID } from "@/lib/config";
 import { isBanterReactionKey, type BanterReactionKey } from "@/lib/banter";
 
 type ReactionMap = Partial<Record<BanterReactionKey, string[]>>;
-type TargetType = "post" | "reply" | "event";
+type TargetType = "post" | "reply" | "event" | "eventReply";
 
 function authToken(req: NextRequest) {
   return req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
 }
 
 function cleanTarget(value: unknown): TargetType {
-  if (value === "reply" || value === "event") return value;
+  if (value === "reply" || value === "event" || value === "eventReply") return value;
   return "post";
 }
 
 function targetRef(postId: string, targetType: TargetType, replyId?: string) {
   if (targetType === "event") {
     return adminDb!.doc(`pools/${POOL_ID}/banterEventReactions/${postId}`);
+  }
+  if (targetType === "eventReply") {
+    if (!replyId) throw new Error("Missing reply id");
+    return adminDb!.doc(`pools/${POOL_ID}/banterEventReplies/${postId}/replies/${replyId}`);
   }
   if (targetType === "reply") {
     if (!replyId) throw new Error("Missing reply id");

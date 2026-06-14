@@ -39,7 +39,7 @@ export function useFixtures(): FixturesState {
       return;
     }
     if (!user) {
-      setFixtures(fallbackFixtures);
+      setFixtures([]);
       setLiveState([]);
       setLoading(false);
       return;
@@ -58,13 +58,13 @@ export function useFixtures(): FixturesState {
         if (!res.ok) throw new Error(`Fixture fetch failed: ${res.status}`);
         const data = (await res.json()) as Partial<FixturesState>;
         if (cancelled) return;
-        setFixtures(data.fixtures?.length ? data.fixtures : fallbackFixtures);
+        setFixtures(data.fixtures ?? []);
         setLiveState(data.liveState ?? []);
         setLoading(false);
       } catch (err) {
         console.warn("[useFixtures]", err);
         if (cancelled) return;
-        setFixtures(fallbackFixtures);
+        setFixtures([]);
         setLiveState([]);
         setLoading(false);
       }

@@ -3,11 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb, adminStorage } from "@/lib/firebase-admin";
 import { POOL_ID, matchDataConfig } from "@/lib/config";
+import { AdminAuthError, verifyAdminToken } from "@/lib/server/admin-guard";
 import type { PlayerDoc, PoolDoc } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function authorized(req: NextRequest) {
+async function authorized(req: NextRequest) {
   const configured = matchDataConfig.syncCronSecret;
   const supplied =
     req.headers.get("x-cron-secret") ||
@@ -15,6 +16,17 @@ function authorized(req: NextRequest) {
 
   if (configured) return supplied === configured;
   return Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+}
+
+async function authorizedBackupRequest(req: NextRequest) {
+  if (await authorized(req)) return true;
+  try {
+    await verifyAdminToken(req, { requireRecent: true });
+    return true;
+  } catch (error) {
+    if (error instanceof AdminAuthError) throw error;
+    return false;
+  }
 }
 
 function isoFromTimestamp(value: unknown) {
@@ -46,11 +58,11 @@ export async function POST(req: NextRequest) {
   if (!adminDb) {
     return NextResponse.json({ error: "Admin SDK not configured" }, { status: 503 });
   }
-  if (!authorized(req)) {
-    return NextResponse.json({ error: "Unauthorized backup request" }, { status: 401 });
-  }
-
   try {
+    if (!(await authorizedBackupRequest(req))) {
+      return NextResponse.json({ error: "Unauthorized backup request" }, { status: 401 });
+    }
+
     const id = backupId();
     const [poolSnap, playersSnap] = await Promise.all([
       adminDb.doc(`pools/${POOL_ID}`).get(),
@@ -156,6 +168,9 @@ export async function POST(req: NextRequest) {
       draftedCount: entries.length,
     });
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 }

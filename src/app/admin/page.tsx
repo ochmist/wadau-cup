@@ -1,11 +1,11 @@
 import { PageShell } from "@/components/PageShell";
-import { AdminSetupScreen } from "@/components/admin/AdminSetupScreen";
+import { AdminControlScreen } from "@/components/admin/AdminControlScreen";
 
-// Admin defaults to Pool Setup & Accounts.
+// Admin defaults to the live data control pane.
 export default function AdminPage() {
   return (
     <PageShell>
-      <AdminSetupScreen />
+      <AdminControlScreen />
     </PageShell>
   );
 }

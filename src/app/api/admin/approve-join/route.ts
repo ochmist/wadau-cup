@@ -28,6 +28,7 @@ function playerDocFromRequest(request: JoinRequestDoc, passwordSet?: boolean): O
     name: request.name,
     short: initials(request.name),
     phone: canonicalPhone(request.cc, request.phone),
+    isAdmin: false,
     paid: false,
     hasDrafted: false,
     finalGoals: null,

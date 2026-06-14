@@ -16,6 +16,14 @@ async function verifyAdmin(token: string) {
   return decoded;
 }
 
+function adminAuditIdentity(decoded: Awaited<ReturnType<typeof verifyAdmin>>) {
+  return {
+    uid: decoded.uid,
+    email: typeof decoded.email === "string" ? decoded.email : null,
+    name: typeof decoded.name === "string" ? decoded.name : null,
+  };
+}
+
 export async function POST(req: NextRequest) {
   if (!adminAuth || !adminDb) {
     return NextResponse.json({ error: "Admin SDK not configured" }, { status: 503 });
@@ -24,7 +32,8 @@ export async function POST(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    await verifyAdmin(token);
+    const decoded = await verifyAdmin(token);
+    const admin = adminAuditIdentity(decoded);
     const body = await req.json();
     const { matchId, ...rest } = body as { matchId: string; [k: string]: unknown };
     const playersSnap = await adminDb.collection(`pools/${POOL_ID}/players`).get();
@@ -43,10 +52,40 @@ export async function POST(req: NextRequest) {
       source: "manual",
       manualOverride: true,
     });
-    await adminDb.doc(`pools/${POOL_ID}/results/${matchId}`).set({
+    const resultRef = adminDb.doc(`pools/${POOL_ID}/results/${matchId}`);
+    const auditRef = adminDb.collection(`pools/${POOL_ID}/adminAudit`).doc();
+    const batch = adminDb.batch();
+    const auditAt = FieldValue.serverTimestamp();
+    batch.set(resultRef, {
       ...result,
-      enteredAt: FieldValue.serverTimestamp(),
+      enteredAt: auditAt,
+      lastEditedAt: auditAt,
+      lastEditedByUid: admin.uid,
+      lastEditedByEmail: admin.email,
+      lastEditedByName: admin.name,
     });
+    batch.set(auditRef, {
+      action: "manual-result-set",
+      targetType: "result",
+      targetId: matchId,
+      poolId: POOL_ID,
+      adminUid: admin.uid,
+      adminEmail: admin.email,
+      adminName: admin.name,
+      createdAt: auditAt,
+      after: {
+        round: result.round,
+        a: result.a,
+        b: result.b,
+        sa: result.sa,
+        sb: result.sb,
+        win: result.win,
+        pens: result.pens,
+        source: result.source ?? null,
+        manualOverride: result.manualOverride ?? false,
+      },
+    });
+    await batch.commit();
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     console.error("[admin/result]", e);
@@ -62,9 +101,26 @@ export async function DELETE(req: NextRequest) {
   if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    await verifyAdmin(token);
+    const decoded = await verifyAdmin(token);
+    const admin = adminAuditIdentity(decoded);
     const { matchId } = (await req.json()) as { matchId: string };
-    await adminDb.doc(`pools/${POOL_ID}/results/${matchId}`).delete();
+    const resultRef = adminDb.doc(`pools/${POOL_ID}/results/${matchId}`);
+    const existing = await resultRef.get();
+    const auditRef = adminDb.collection(`pools/${POOL_ID}/adminAudit`).doc();
+    const batch = adminDb.batch();
+    batch.set(auditRef, {
+      action: "manual-result-clear",
+      targetType: "result",
+      targetId: matchId,
+      poolId: POOL_ID,
+      adminUid: admin.uid,
+      adminEmail: admin.email,
+      adminName: admin.name,
+      createdAt: FieldValue.serverTimestamp(),
+      before: existing.exists ? existing.data() : null,
+    });
+    batch.delete(resultRef);
+    await batch.commit();
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

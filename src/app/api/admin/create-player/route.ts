@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
       name,
       short: initials(name),
       phone: canonicalPhone(cc, phone),
+      isAdmin: false,
       paid: false,
       approvalStatus: "approved",
       passwordSet: false,

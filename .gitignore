@@ -17,3 +17,6 @@ serviceAccount*.json
 
 # Claude Design handoff bundle (local reference only)
 .design-handoff/
+.design-handoff-2/
+.design-handoff-3/
+.design-handoff-4/

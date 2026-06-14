@@ -10,6 +10,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Crest, ThemeToggle } from "@/components/ds";
 import { AppGuard } from "@/components/AppGuard";
+import { LiveMarker } from "@/components/LiveMarker";
 import { useAuth } from "@/lib/auth";
 import { useMyData } from "@/hooks/useMyData";
 import { usePool } from "@/hooks/usePool";
@@ -78,6 +79,18 @@ function stageStatus(round: string, group?: string | null) {
   return stageLabel(round);
 }
 
+function liveStatusLabel(fixture: { kickoffAt: string }, live?: { minute?: number | null; extra?: number | null; statusShort?: string | null; statusLong?: string | null }) {
+  if (typeof live?.minute === "number") {
+    return `${live.minute}${typeof live.extra === "number" && live.extra > 0 ? `+${live.extra}` : ""}'`;
+  }
+  const kickoff = Date.parse(fixture.kickoffAt);
+  if (!Number.isNaN(kickoff)) {
+    const elapsed = Math.max(1, Math.floor((Date.now() - kickoff) / 60_000) + 1);
+    if (elapsed > 0 && elapsed < 130) return `${elapsed}'`;
+  }
+  return live?.statusShort ?? live?.statusLong ?? "LIVE";
+}
+
 export function PageShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "/";
   const { user, isAdmin, hasDrafted } = useAuth();
@@ -98,10 +111,21 @@ export function PageShell({ children }: { children: ReactNode }) {
     .slice(0, 2)
     .toUpperCase();
   const avatar = player?.short ?? fallbackInitials;
-  const statusPill = useMemo(() => {
-    const liveIds = new Set(liveState.filter((state) => state.status === "live" || state.status === "paused").map((state) => state.fixtureId));
-    const liveFixture = fixtures.find((fixture) => fixture.status === "live" || liveIds.has(fixture.id));
-    if (liveFixture) return `Live · ${stageStatus(liveFixture.round, liveFixture.group)}`;
+  const status = useMemo(() => {
+    const liveByFixture = new Map(liveState.map((state) => [state.fixtureId, state]));
+    const liveFixture = fixtures.find((fixture) => {
+      const live = liveByFixture.get(fixture.id);
+      return fixture.status === "live" || live?.status === "live" || live?.status === "paused";
+    });
+    if (liveFixture) {
+      return {
+        kind: "live" as const,
+        label: stageStatus(liveFixture.round, liveFixture.group),
+        live: liveByFixture.get(liveFixture.id),
+        clock: liveStatusLabel(liveFixture, liveByFixture.get(liveFixture.id)),
+        href: `/fixtures/${encodeURIComponent(liveFixture.id)}`,
+      };
+    }
 
     const now = Date.now();
     const nextFixture = fixtures
@@ -110,11 +134,10 @@ export function PageShell({ children }: { children: ReactNode }) {
         return !Number.isNaN(kickoff) && kickoff >= now && fixture.status !== "finished";
       })
       .sort((a, b) => Date.parse(a.kickoffAt) - Date.parse(b.kickoffAt))[0];
-    if (nextFixture) return `Next · ${stageStatus(nextFixture.round, nextFixture.group)}`;
+    if (nextFixture) return { kind: "text" as const, label: `Next · ${stageStatus(nextFixture.round, nextFixture.group)}` };
 
-    return round ? `Status · ${stageLabel(round)}` : "Status · Fixtures";
+    return { kind: "text" as const, label: round ? `Status · ${stageLabel(round)}` : "Status · Fixtures" };
   }, [fixtures, liveState, round]);
-  const isLiveStatus = statusPill.startsWith("Live ·");
 
   useEffect(() => {
     let cancelled = false;
@@ -148,11 +171,18 @@ export function PageShell({ children }: { children: ReactNode }) {
       <div
         className="wc-desktop-only"
         style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 50,
           alignItems: "center",
           justifyContent: "space-between",
           padding: "18px 28px",
           borderBottom: "1px solid var(--line)",
           display: "flex",
+          background: "var(--bg)",
+          boxSizing: "border-box",
         }}
       >
         <Link
@@ -190,10 +220,20 @@ export function PageShell({ children }: { children: ReactNode }) {
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className="wc-pill">
-            {isLiveStatus && <span className="wc-live-dot" />}
-            {statusPill}
-          </span>
+          {status.kind === "live" ? (
+            <Link href={status.href} style={{ textDecoration: "none", display: "inline-flex" }} title="Open live match">
+              <LiveMarker
+                compact
+                label={status.clock}
+                minute={status.live?.minute}
+                extra={status.live?.extra}
+                statusShort={status.live?.statusShort}
+                statusLong={status.live?.statusLong}
+              />
+            </Link>
+          ) : (
+            <span className="wc-pill">{status.label}</span>
+          )}
           <ThemeToggle />
           <LogoutButton />
           <div className="wc-avatar">{avatar}</div>
@@ -201,7 +241,7 @@ export function PageShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* ---------- MOBILE status + app bar ---------- */}
-      <div className="wc-mobile-only" style={{ display: "block" }}>
+      <div className="wc-mobile-only" style={{ display: "block", position: "fixed", top: 0, left: 0, right: 0, zIndex: 50, background: "var(--bg)", borderBottom: "1px solid var(--line)" }}>
         {/* app bar */}
         <div style={{ padding: "14px 18px 0" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -237,6 +277,8 @@ export function PageShell({ children }: { children: ReactNode }) {
       </div>
 
       {/* ---------- page body (gated) ---------- */}
+      <div className="wc-desktop-only" style={{ height: 71 }} aria-hidden />
+      <div className="wc-mobile-only" style={{ height: 66 }} aria-hidden />
       <AppGuard>{children}</AppGuard>
 
       {/* ---------- MOBILE bottom nav (fixed) ---------- */}

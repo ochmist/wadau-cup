@@ -101,6 +101,7 @@ export type PlayerDoc = {
   name: string;
   short: string; // 2-char display initials
   phone: string;
+  isAdmin?: boolean;
   paid: boolean;
   approvalStatus?: "pending" | "approved";
   passwordSet?: boolean;
@@ -136,6 +137,10 @@ export type ResultDoc = {
   manualOverride?: boolean;
   source?: "manual" | "football-data" | "api-football" | "openfootball";
   providerMatchId?: string;
+  lastEditedAt?: Timestamp;
+  lastEditedByUid?: string;
+  lastEditedByEmail?: string | null;
+  lastEditedByName?: string | null;
 };
 
 // ── Firestore: pools/{poolId}/fixtures/{matchId} ──────────────────────────
@@ -202,6 +207,10 @@ export type SyncStatusDoc = {
   lockedResultCount?: number;
   skippedManualCount?: number;
   syncedAt?: Timestamp;
+  fixtureSyncedAt?: Timestamp;
+  syncMode?: "fixtures" | "live";
+  livePollSeconds?: number;
+  fullTimePollSeconds?: number;
 };
 
 // ── Firestore: pools/{poolId}/standings/current ────────────────────────────

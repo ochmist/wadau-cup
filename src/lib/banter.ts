@@ -48,6 +48,37 @@ export const BANTER_EMOJI_GROUPS = [
 
 export type BanterReactionKey = string;
 
+export const BANTER_STICKERS = [
+  { id: "wueh", emoji: "😮‍💨", label: "Wueh" },
+  { id: "goal", emoji: "⚽", label: "Goal!" },
+  { id: "var-check", emoji: "📺", label: "VAR check" },
+  { id: "cooked", emoji: "🍳", label: "Cooked" },
+  { id: "dust", emoji: "💨", label: "Dust" },
+  { id: "receipts", emoji: "🧾", label: "Receipts" },
+  { id: "pain", emoji: "😭", label: "Pain" },
+  { id: "fire", emoji: "🔥", label: "On fire" },
+  { id: "eyes", emoji: "👀", label: "Watching" },
+  { id: "trophy", emoji: "🏆", label: "Trophy" },
+  { id: "clap", emoji: "👏", label: "Clap" },
+  { id: "lock", emoji: "🔒", label: "Locked" },
+] as const satisfies readonly { id: string; emoji: string; label: string }[];
+
+export type BanterContentKind = "text" | "sticker";
+
+export type BanterStickerView = {
+  id: string;
+  emoji: string;
+  label: string;
+};
+
+export type BanterMemberView = {
+  uid: string;
+  name: string;
+  short: string;
+};
+
+export type BanterMentionView = BanterMemberView;
+
 export type BanterReactionView = {
   key: BanterReactionKey;
   emoji: string;
@@ -61,7 +92,10 @@ export type BanterReplyView = {
   uid: string;
   name: string;
   short: string;
+  kind: BanterContentKind;
   body: string;
+  sticker: BanterStickerView | null;
+  mentions: BanterMentionView[];
   createdAt: string;
   reactions: BanterReactionView[];
   reactionTotal: number;
@@ -74,7 +108,10 @@ export type BanterMessageView = {
   uid: string;
   name: string;
   short: string;
+  kind: BanterContentKind;
   body: string;
+  sticker: BanterStickerView | null;
+  mentions: BanterMentionView[];
   createdAt: string;
   updatedAt?: string | null;
   reactions: BanterReactionView[];
@@ -91,6 +128,7 @@ export type BanterEventAccent = "neutral" | "lime" | "gold" | "down" | "violet";
 export type BanterEventView = {
   type: "event";
   id: string;
+  fixtureId?: string;
   icon: string;
   accent: BanterEventAccent;
   title: string;
@@ -98,6 +136,9 @@ export type BanterEventView = {
   occurredAt: string;
   reactions: BanterReactionView[];
   reactionTotal: number;
+  replies: BanterReplyView[];
+  replyCount: number;
+  unreadReplyCount: number;
 };
 
 export type BanterFeedItem = BanterMessageView | BanterEventView;
@@ -105,6 +146,7 @@ export type BanterFeedItem = BanterMessageView | BanterEventView;
 export type BanterFeedView = {
   items: BanterFeedItem[];
   posts: BanterMessageView[];
+  members: BanterMemberView[];
   memberCount: number;
   notificationCount: number;
   me: {
@@ -129,6 +171,11 @@ export function banterReactionMeta(key: string) {
   return { key, emoji: key, label: key };
 }
 
+export function banterStickerById(value: unknown): BanterStickerView | null {
+  if (typeof value !== "string") return null;
+  return BANTER_STICKERS.find((sticker) => sticker.id === value) ?? null;
+}
+
 export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return (parts[0]?.[0] + (parts[1]?.[0] ?? parts[0]?.[1] ?? "W")).toUpperCase().slice(0, 2);
@@ -137,6 +184,25 @@ export function initials(name: string) {
 export function cleanBanterBody(value: unknown) {
   if (typeof value !== "string") return "";
   return value.replace(/\s+/g, " ").trim().slice(0, 280);
+}
+
+export function memberMentionKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+export function mentionHandleForMember(member: Pick<BanterMemberView, "name" | "short">) {
+  const fromName = member.name.replace(/[^A-Za-z0-9]+/g, "");
+  const fromShort = member.short.replace(/[^A-Za-z0-9]+/g, "");
+  return fromName || fromShort || "Wadau";
+}
+
+export function memberMatchesMentionHandle(rawHandle: string, member: Pick<BanterMemberView, "name" | "short">) {
+  const key = memberMentionKey(rawHandle);
+  if (!key) return false;
+  const fullName = memberMentionKey(member.name);
+  const short = memberMentionKey(member.short);
+  const first = memberMentionKey(member.name.trim().split(/\s+/)[0] ?? "");
+  return key === fullName || key === short || key === first;
 }
 
 export const teamMentionMap = Object.fromEntries(

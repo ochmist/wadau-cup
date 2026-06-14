@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase-admin";
 import { POOL_ID, matchDataConfig } from "@/lib/config";
-import { getMatchAdapterState } from "@/lib/server/match-adapter";
+import { AdminAuthError, verifyAdminToken } from "@/lib/server/admin-guard";
+import { getKnownFixtureUpdates, getMatchAdapterState } from "@/lib/server/match-adapter";
 import { buildResultDoc } from "@/lib/server/result-doc";
 import { recomputeStandings } from "@/lib/server/recompute-standings";
 import type { PlayerDoc, ResultDoc } from "@/lib/types";
@@ -10,16 +11,28 @@ import type { FixtureDoc } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function authorized(req: NextRequest) {
+const MIN_COMPLETE_FIXTURE_COUNT = 64;
+
+async function authorized(req: NextRequest) {
   const configured = matchDataConfig.syncCronSecret;
   const supplied =
     req.headers.get("x-cron-secret") ||
     req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
   if (configured) return supplied === configured;
+  if (process.env.FIRESTORE_EMULATOR_HOST) return true;
+  return false;
+}
 
-  // Keep local emulator development usable while making production require a secret.
-  return Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+async function authorizedSyncRequest(req: NextRequest) {
+  if (await authorized(req)) return true;
+  try {
+    await verifyAdminToken(req, { requireRecent: true });
+    return true;
+  } catch (error) {
+    if (error instanceof AdminAuthError) throw error;
+    return false;
+  }
 }
 
 function sameLockedResult(existing: ResultDoc | undefined, next: Omit<ResultDoc, "enteredAt">) {
@@ -63,7 +76,7 @@ function hasLiveWindow(fixtures: FixtureDoc[], now = Date.now()) {
     if (fixture.status === "live") return true;
     const kickoff = Date.parse(fixture.kickoffAt);
     if (Number.isNaN(kickoff)) return false;
-    return now >= kickoff && now <= kickoff + 150 * 60 * 1000;
+    return now >= kickoff - 20 * 60 * 1000 && now <= kickoff + 150 * 60 * 1000;
   });
 }
 
@@ -76,16 +89,26 @@ function hasUnrecordedPastFixture(fixtures: FixtureDoc[], resultIds: Set<string>
   });
 }
 
+function pollableKnownFixtureCount(fixtures: (FixtureDoc & { id: string })[], resultIds: Set<string>, now = Date.now()) {
+  return fixtures.filter((fixture) => {
+    if (!fixture.sourceIds?.apiFootball) return false;
+    if (fixture.status === "live") return true;
+    if (resultIds.has(fixture.id)) return false;
+    const kickoff = Date.parse(fixture.kickoffAt);
+    return !Number.isNaN(kickoff) && now >= kickoff - 20 * 60 * 1000 && now <= kickoff + 36 * 60 * 60 * 1000;
+  }).length;
+}
+
 export async function POST(req: NextRequest) {
   if (!adminDb) {
     return NextResponse.json({ error: "Admin SDK not configured" }, { status: 503 });
   }
 
-  if (!authorized(req)) {
-    return NextResponse.json({ error: "Unauthorized sync request" }, { status: 401 });
-  }
-
   try {
+    if (!(await authorizedSyncRequest(req))) {
+      return NextResponse.json({ error: "Unauthorized sync request" }, { status: 401 });
+    }
+
     const statusRef = adminDb.doc(`pools/${POOL_ID}/sync/status`);
     const [statusSnap, existingFixturesSnap, existingResultsSnap, existingLiveSnap] = await Promise.all([
       statusRef.get(),
@@ -98,17 +121,21 @@ export async function POST(req: NextRequest) {
       existingResultsSnap.docs.map((doc) => [doc.id, { ...(doc.data() as ResultDoc), id: doc.id }]),
     );
     const existingResultIds = new Set(existingResults.keys());
-    const lastFixtureSyncMs = timestampMillis(statusSnap.get("syncedAt"));
+    const lastFixtureSyncMs = timestampMillis(statusSnap.get("fixtureSyncedAt") ?? statusSnap.get("syncedAt"));
+    const mode = req.nextUrl.searchParams.get("mode");
     const force = req.nextUrl.searchParams.get("force") === "1";
     const needsDailyFixtureRefresh = !lastFixtureSyncMs || Date.now() - lastFixtureSyncMs > 24 * 60 * 60 * 1000;
     const liveWindowOpen = hasLiveWindow(cachedFixtures);
     const needsResultCatchup = hasUnrecordedPastFixture(cachedFixtures, existingResultIds);
 
-    if (!force && cachedFixtures.length > 0 && !needsDailyFixtureRefresh && !liveWindowOpen && !needsResultCatchup) {
+    const useFullFixtureRefresh = force || mode === "fixtures" || (!mode && needsDailyFixtureRefresh);
+
+    if (!useFullFixtureRefresh && cachedFixtures.length > 0 && !liveWindowOpen && !needsResultCatchup) {
       return NextResponse.json({
         ok: true,
         skipped: true,
-        reason: "No match is inside a live polling window and fixtures were refreshed in the last 24 hours.",
+        syncMode: "live",
+        reason: "No match is inside a live polling window.",
         fixtureCount: cachedFixtures.length,
         needsResultCatchup,
       });
@@ -118,15 +145,33 @@ export async function POST(req: NextRequest) {
     const quotaSnap = await quotaRef.get();
     const apiFootballCalls = Number(quotaSnap.get("calls") ?? 0);
     const apiFootballConfigured = Boolean(matchDataConfig.enableLiveLayer && matchDataConfig.apiFootballApiKey);
-    const useApiFootballFixtures = force || needsDailyFixtureRefresh || needsResultCatchup;
-    const estimatedApiFootballCalls = useApiFootballFixtures ? 800 : 60;
+    const pollableCount = pollableKnownFixtureCount(cachedFixtures, existingResultIds);
+    const estimatedApiFootballCalls = useFullFixtureRefresh ? 800 : Math.max(1, pollableCount) * 4;
     const apiFootballAllowed = !apiFootballConfigured || apiFootballCalls + estimatedApiFootballCalls <= matchDataConfig.apiFootballDailyCap;
 
     const [adapterState, playersSnap] = await Promise.all([
-      getMatchAdapterState({
-        enableApiFootball: apiFootballAllowed,
-        enableApiFootballFixtures: useApiFootballFixtures,
-      }),
+      useFullFixtureRefresh
+        ? getMatchAdapterState({
+            enableApiFootball: apiFootballAllowed,
+            enableApiFootballFixtures: true,
+          })
+        : apiFootballAllowed
+          ? getKnownFixtureUpdates({
+              fixtures: cachedFixtures,
+              resultIds: existingResultIds,
+            })
+          : Promise.resolve({
+              fixtures: [],
+              liveState: [],
+              teamProfiles: [],
+              apiFootballCalls: 0,
+              warnings: [{ provider: "api-football", message: "Daily live-score quota reached; live poll skipped until tomorrow." }],
+              providerConfigured: {
+                footballData: Boolean(matchDataConfig.footballDataApiKey),
+                apiFootball: Boolean(matchDataConfig.apiFootballApiKey && matchDataConfig.enableLiveLayer),
+                openfootball: Boolean(matchDataConfig.openfootballFixturesUrl),
+              },
+            }),
       adminDb.collection(`pools/${POOL_ID}/players`).get(),
     ]);
 
@@ -140,7 +185,14 @@ export async function POST(req: NextRequest) {
     let clearedFixtureCount = 0;
     let clearedLiveCount = 0;
 
-    for (const fixture of adapterState.fixtures) {
+    const adapterHasCompleteSchedule = useFullFixtureRefresh && adapterState.fixtures.length >= MIN_COMPLETE_FIXTURE_COUNT;
+    const preserveCachedFixtures =
+      useFullFixtureRefresh &&
+      !adapterHasCompleteSchedule &&
+      cachedFixtures.length >= MIN_COMPLETE_FIXTURE_COUNT;
+    const fixturesToWrite = preserveCachedFixtures ? [] : adapterState.fixtures;
+
+    for (const fixture of fixturesToWrite) {
       const { result: _result, liveState: _liveState, ...fixtureDoc } = fixture;
       batch.set(
         adminDb.doc(`pools/${POOL_ID}/fixtures/${fixture.id}`),
@@ -180,9 +232,11 @@ export async function POST(req: NextRequest) {
       lockedResultCount += 1;
     }
 
-    const nextFixtureIds = new Set(adapterState.fixtures.map((fixture) => fixture.id));
+    const nextFixtureIds = new Set(fixturesToWrite.map((fixture) => fixture.id));
     for (const fixtureDoc of existingFixturesSnap.docs) {
       if (nextFixtureIds.has(fixtureDoc.id)) continue;
+      if (!useFullFixtureRefresh) continue;
+      if (!force && !adapterHasCompleteSchedule && fixtureDoc.get("source") !== "temporary") continue;
       batch.delete(fixtureDoc.ref);
       clearedFixtureCount += 1;
     }
@@ -220,15 +274,27 @@ export async function POST(req: NextRequest) {
       adminDb.doc(`pools/${POOL_ID}/sync/status`),
       {
         providerConfigured: adapterState.providerConfigured,
-        warnings: adapterState.warnings,
-        fixtureCount,
+        warnings: preserveCachedFixtures
+          ? [
+              ...adapterState.warnings,
+              {
+                provider: "sync",
+                message: `Preserved cached schedule because provider refresh returned only ${adapterState.fixtures.length} fixtures.`,
+              },
+            ]
+          : adapterState.warnings,
+        fixtureCount: useFullFixtureRefresh && adapterHasCompleteSchedule ? fixtureCount : cachedFixtures.length,
         liveCount,
         teamProfileCount: adapterState.teamProfiles.length,
         clearedFixtureCount,
         clearedLiveCount,
         lockedResultCount,
         skippedManualCount,
+        syncMode: useFullFixtureRefresh ? "fixtures" : "live",
+        livePollSeconds: matchDataConfig.livePollSeconds,
+        fullTimePollSeconds: matchDataConfig.fullTimePollSeconds,
         syncedAt: FieldValue.serverTimestamp(),
+        ...(useFullFixtureRefresh ? { fixtureSyncedAt: FieldValue.serverTimestamp() } : {}),
       },
       { merge: true },
     );
@@ -251,6 +317,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      syncMode: useFullFixtureRefresh ? "fixtures" : "live",
       fixtureCount,
       liveCount,
       teamProfileCount: adapterState.teamProfiles.length,
@@ -269,6 +336,9 @@ export async function POST(req: NextRequest) {
       recompute,
     });
   } catch (error) {
+    if (error instanceof AdminAuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("[sync-results]", error);
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
