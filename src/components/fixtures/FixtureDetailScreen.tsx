@@ -7,6 +7,7 @@ import { SectionLabel } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
 import { T } from "@/lib/data";
 import { fixtureStageLabel } from "@/lib/fixtures";
+import { pointsForResult, roundLabel } from "@/lib/standings";
 import { useFixtures } from "@/hooks/useFixtures";
 import { useResults } from "@/hooks/useResults";
 import { useStandings } from "@/hooks/useStandings";
@@ -378,9 +379,47 @@ function LiveScoreboard({ game, compact = false }: { game: MatchGame; compact?: 
   );
 }
 
-function HolderChip({ player, teamCode, currentUid }: { player: SerializedPlayer; teamCode: string; currentUid?: string }) {
+type HolderProjection = {
+  delta: number;
+  label: string;
+};
+
+function scoringKeyForGame(game: MatchGame, teamCode: string): string | null {
+  if (game.sa == null || game.sb == null) return null;
+  const round = roundLabel(game.round);
+  if (game.sa === game.sb) return `${round} · Draw`;
+  const winner = game.sa > game.sb ? game.a : game.b;
+  if (winner !== teamCode) return null;
+  return round === "Final" ? "Final · Champion" : `${round} · Win`;
+}
+
+function holderProjection(game: MatchGame, pick: SerializedPlayer["teams"][number] | undefined, teamCode: string): HolderProjection | null {
+  if (!pick) return null;
+  const finished = game.status === "finished";
+  const key = scoringKeyForGame(game, teamCode);
+  if (!key) {
+    if (game.sa != null && game.sb != null) {
+      return {
+        delta: 0,
+        label: finished ? `No points earned · ${pick.pts} total` : `No points projected · ${pick.pts} current`,
+      };
+    }
+    return null;
+  }
+  const delta = pointsForResult(key, pick.tier);
+  return {
+    delta,
+    label: finished
+      ? `${delta > 0 ? `+${delta}` : "No points"} earned · ${pick.pts} total`
+      : `${delta > 0 ? `+${delta}` : "No points"} projected · ${pick.pts} current`,
+  };
+}
+
+function HolderChip({ player, teamCode, currentUid, game }: { player: SerializedPlayer; teamCode: string; currentUid?: string; game: MatchGame }) {
   const pick = player.teams.find((team) => team.code === teamCode);
   const isMe = player.uid === currentUid;
+  const projection = holderProjection(game, pick, teamCode);
+  const detail = projection?.label ?? (pick ? `${pick.pts} pts · +${pick.rem} still possible` : "picked this team");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 11, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
       <div className="wc-avatar" style={{ width: 30, height: 30, borderRadius: 9, background: isMe ? "var(--lime)" : "var(--surface-3)", color: isMe ? "var(--on-lime)" : "var(--dim)" }}>
@@ -391,8 +430,8 @@ function HolderChip({ player, teamCode, currentUid }: { player: SerializedPlayer
           <span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-0.01em" }}>{isMe ? "You" : player.name}</span>
           <span className="wc-num" style={{ fontSize: 10, color: player.rank <= 3 ? "var(--gold)" : "var(--faint)" }}>P{player.rank || "–"}</span>
         </div>
-        <div style={{ fontSize: 11.5, color: "var(--dim)", fontWeight: 600, marginTop: 1 }}>
-          {pick ? `${pick.pts} pts · +${pick.rem} still possible` : "picked this team"}
+        <div style={{ fontSize: 11.5, color: projection && projection.delta > 0 ? "var(--lime-ink)" : "var(--dim)", fontWeight: 600, marginTop: 1 }}>
+          {detail}
         </div>
       </div>
     </div>
@@ -453,7 +492,7 @@ function StakesBand({ game, players, currentUid }: { game: MatchGame; players: S
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                 {holders.length ? holders.map((player) => (
-                  <HolderChip key={player.uid} player={player} teamCode={side.code ?? ""} currentUid={currentUid} />
+                  <HolderChip key={player.uid} player={player} teamCode={side.code ?? ""} currentUid={currentUid} game={game} />
                 )) : (
                   <div style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.4 }}>No one in the pool holds this side.</div>
                 )}

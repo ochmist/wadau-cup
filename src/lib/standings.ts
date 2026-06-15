@@ -101,7 +101,7 @@ export type ComputedPlayer = {
   aliveCount: number;
 };
 
-function pointsForResult(
+export function pointsForResult(
   resultType: string,
   tier: Tier,
 ): number {
@@ -110,7 +110,7 @@ function pointsForResult(
   return row[TIER_INDEX[tier]] ?? 0;
 }
 
-function roundLabel(round: string): string {
+export function roundLabel(round: string): string {
   // Normalize "Group F", "Group Stage" → "Group"; keep R16 etc as-is.
   if (round.startsWith("Group")) return "Group";
   return round;
