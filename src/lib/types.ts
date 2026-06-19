@@ -232,7 +232,11 @@ export type SerializedPlayer = Omit<PlayerDoc, "joinedAt" | "picks"> & {
     pts: number;
     rem: number;
     alive: boolean;
+    stageGamesLeft?: number;
+    stagePossiblePoints?: number;
   }[];
+  stageGamesLeft?: number;
+  stagePossiblePoints?: number;
   me?: boolean; // set client-side based on auth UID
   // compatibility aliases matching the legacy Player type used in display components
   prev?: number;

@@ -40,6 +40,7 @@ function preferDisplayPlayer(existing: SerializedPlayer, next: SerializedPlayer)
   if (next.paid !== existing.paid) return next.paid ? next : existing;
   if ((next.rank > 0) !== (existing.rank > 0)) return next.rank > 0 ? next : existing;
   if (next.teams.length !== existing.teams.length) return next.teams.length > existing.teams.length ? next : existing;
+  if (existing.stageGamesLeft == null && next.stageGamesLeft != null) return next;
   return next.points > existing.points ? next : existing;
 }
 
@@ -66,6 +67,8 @@ function pendingPlaceholder(index: number): SerializedPlayer {
     finalGoals: null,
     points: 0,
     ceiling: 0,
+    stageGamesLeft: 0,
+    stagePossiblePoints: 0,
     rank: 0,
     prevRank: 0,
     mover: 0,
@@ -147,6 +150,45 @@ function PaymentInfoCard({ buyin }: { buyin: number }) {
   );
 }
 
+function MyStandingJump({ player, onJump }: { player: SerializedPlayer; onJump: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onJump}
+      className="wc-card"
+      style={{
+        width: "100%",
+        borderColor: "var(--lime-line)",
+        background: "var(--lime-soft)",
+        color: "var(--text)",
+        padding: "11px 14px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        textAlign: "left",
+      }}
+    >
+      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <span className="wc-avatar" style={{ width: 30, height: 30, borderRadius: 9 }}>{player.short}</span>
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Your spot · {player.rank > 0 ? `P${player.rank}` : "unranked"}
+          </span>
+          <span className="wc-num" style={{ display: "block", marginTop: 2, fontSize: 11, color: "var(--dim)" }}>
+            {player.points} pts · ceiling {player.ceiling}
+          </span>
+        </span>
+      </span>
+      <span className="wc-num" style={{ fontSize: 11, fontWeight: 700, color: "var(--lime-ink)", whiteSpace: "nowrap" }}>
+        Jump to row ↓
+      </span>
+    </button>
+  );
+}
+
 export function Leaderboard() {
   const { user, approvalStatus } = useAuth();
   const { players, scaleMax, round, computedAt, loading } = useStandings(user?.uid, approvalStatus !== "pending");
@@ -154,6 +196,7 @@ export function Leaderboard() {
   const { buyin, payoutPct, round: poolRound } = usePool();
   const countdown = useCountdown();
   const [showPaymentInfo, setShowPaymentInfo] = useState(false);
+  const [prizeExpanded, setPrizeExpanded] = useState(false);
   const picksArePublic = countdown.ready && countdown.isLocked;
   const router = useRouter();
   const goToPlayer = (name: string) => router.push(`/player/${encodeURIComponent(name)}`);
@@ -172,6 +215,8 @@ export function Leaderboard() {
     finalGoals: myPlayer.finalGoals,
     points: myPlayer.points || myPoints,
     ceiling: myPlayer.ceiling || myCeiling,
+    stageGamesLeft: undefined,
+    stagePossiblePoints: undefined,
     rank: myPlayer.rank,
     prevRank: myPlayer.prevRank,
     mover: myPlayer.mover,
@@ -245,6 +290,16 @@ export function Leaderboard() {
     buyin,
     updated: formatUpdated(computedAt),
   };
+  const currentVisiblePlayer = user ? W.players.find((p) => p.uid === user.uid || p.me) : null;
+  const showMyJump = Boolean(currentVisiblePlayer && !viewerPending && currentVisiblePlayer.rank > 3);
+  const jumpToMyRow = () => {
+    const rows = [
+      document.getElementById("leaderboard-me-row-desktop"),
+      document.getElementById("leaderboard-me-row-mobile"),
+    ].filter(Boolean) as HTMLElement[];
+    const visibleRow = rows.find((row) => row.offsetParent !== null) ?? rows[0];
+    visibleRow?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   if (loading || (user && myPlayerLoading)) {
     return (
@@ -308,6 +363,8 @@ export function Leaderboard() {
         }}
       >
         {/* main table */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+        {showMyJump && currentVisiblePlayer && <MyStandingJump player={currentVisiblePlayer} onJump={jumpToMyRow} />}
         <div className="wc-card" style={{ overflow: "hidden", minWidth: 0 }}>
           <div
             style={{
@@ -358,12 +415,14 @@ export function Leaderboard() {
                   last={i === W.players.length - 1}
                   moneyCutoffPoints={moneyCutoffPoints}
                   hidePicks={(viewerPending && !p.me) || (!picksArePublic && !p.me)}
+                  rowId={p.me ? "leaderboard-me-row-desktop" : undefined}
                   onClick={viewerPending && !p.me ? undefined : () => goToPlayer(p.name)}
                 />
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
             ))
           )}
+        </div>
         </div>
 
         {/* right rail */}
@@ -382,13 +441,34 @@ export function Leaderboard() {
               }}
             />
             <div className="wc-eyebrow">Prize pool</div>
-            <div className="wc-num" style={{ fontSize: 34, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 8 }}>
-              {fmtKES(W.pot)}
-            </div>
-            <div className="wc-eyebrow" style={{ marginTop: 6, color: "var(--dim)" }}>
+            <button
+              type="button"
+              onClick={() => setPrizeExpanded((value) => !value)}
+              style={{
+                width: "100%",
+                padding: 0,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                textAlign: "left",
+                position: "relative",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                <div className="wc-num" style={{ fontSize: 34, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 8 }}>
+                  {fmtKES(W.pot)}
+                </div>
+                <span className="wc-num" style={{ fontSize: 11, color: "var(--lime-ink)", fontWeight: 700 }}>
+                  {prizeExpanded ? "Hide" : "Details"}
+                </span>
+              </div>
+            </button>
+            {prizeExpanded && <div className="wc-eyebrow" style={{ marginTop: 6, color: "var(--dim)" }}>
               {paidEntries} paid of {W.entries} players · {fmtKES(W.buyin)} buy-in
-            </div>
-            <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+            </div>}
+            {prizeExpanded && <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 10 }}>
               {(
                 [
                   ["1st place", W.payouts[0], payoutPct[0]],
@@ -419,7 +499,7 @@ export function Leaderboard() {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
 
           {/* biggest mover */}
@@ -497,6 +577,11 @@ export function Leaderboard() {
       {/* ============ MOBILE ============ */}
       <div className="wc-mobile-only" style={{ display: "block" }}>
         <div style={{ padding: "0 18px" }}>
+          {showMyJump && currentVisiblePlayer && (
+            <div style={{ marginTop: 14 }}>
+              <MyStandingJump player={currentVisiblePlayer} onJump={jumpToMyRow} />
+            </div>
+          )}
           {/* pot card */}
           <div
             className="wc-card"
@@ -524,21 +609,39 @@ export function Leaderboard() {
             >
               <div>
                 <div className="wc-eyebrow">Prize pool</div>
-                <div
-                  className="wc-num"
+                <button
+                  type="button"
+                  onClick={() => setPrizeExpanded((value) => !value)}
                   style={{
-                    fontSize: 31,
-                    fontWeight: 600,
-                    letterSpacing: "-0.03em",
-                    lineHeight: 1,
-                    marginTop: 7,
-                    whiteSpace: "nowrap",
+                    padding: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    textAlign: "left",
                   }}
                 >
-                  {fmtKES(W.pot)}
-                </div>
+                  <span
+                    className="wc-num"
+                    style={{
+                      display: "block",
+                      fontSize: 31,
+                      fontWeight: 600,
+                      letterSpacing: "-0.03em",
+                      lineHeight: 1,
+                      marginTop: 7,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {fmtKES(W.pot)}
+                  </span>
+                  <span className="wc-num" style={{ display: "block", marginTop: 6, fontSize: 10.5, color: "var(--lime-ink)", fontWeight: 700 }}>
+                    {prizeExpanded ? "Hide details" : "Show payout"}
+                  </span>
+                </button>
               </div>
-              <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6 }}>
+              {prizeExpanded && <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ whiteSpace: "nowrap" }}>
                   <span className="wc-num" style={{ fontSize: 15, fontWeight: 600 }}>
                     {paidEntries}
@@ -555,10 +658,10 @@ export function Leaderboard() {
                     buy-in
                   </span>
                 </div>
-              </div>
+              </div>}
             </div>
             {/* payout split */}
-            <div style={{ display: "flex", gap: 7, marginTop: 15, position: "relative" }}>
+            {prizeExpanded && <div style={{ display: "flex", gap: 7, marginTop: 15, position: "relative" }}>
               {(
                 [
                   ["1st", W.payouts[0], payoutPct[0]],
@@ -587,7 +690,7 @@ export function Leaderboard() {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
 
           {/* round status row */}
@@ -626,6 +729,7 @@ export function Leaderboard() {
                   last={i === W.players.length - 1}
                   moneyCutoffPoints={moneyCutoffPoints}
                   hidePicks={(viewerPending && !p.me) || (!picksArePublic && !p.me)}
+                  rowId={p.me ? "leaderboard-me-row-mobile" : undefined}
                   onClick={viewerPending && !p.me ? undefined : () => goToPlayer(p.name)}
                 />
                 {picksArePublic && p.rank === 3 && <MoneyLine />}

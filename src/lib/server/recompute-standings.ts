@@ -1,8 +1,8 @@
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { POOL_ID } from "@/lib/config";
 import { compareTeamsByGroup, T } from "@/lib/data";
-import { computeStandings, type RawPick } from "@/lib/standings";
-import type { PlayerDoc, PoolDoc, ResultDoc, Tier } from "@/lib/types";
+import { computeStandings, type RawFixture, type RawPick } from "@/lib/standings";
+import type { FixtureDoc, PlayerDoc, PoolDoc, ResultDoc, Tier } from "@/lib/types";
 
 function displayIdentity(p: Pick<PlayerDoc, "phone" | "name" | "short">) {
   if (p.phone === "+254 700 000 000" && p.name === "Admin") {
@@ -70,8 +70,19 @@ export async function recomputeStandings(db: Firestore, poolId = POOL_ID) {
 
   const resultsSnap = await db.collection(`pools/${poolId}/results`).get();
   const results = resultsSnap.docs.map((d) => ({ ...(d.data() as ResultDoc), id: d.id }));
+  const fixturesSnap = await db.collection(`pools/${poolId}/fixtures`).get();
+  const fixtures: RawFixture[] = fixturesSnap.docs.map((d) => {
+    const fixture = d.data() as FixtureDoc;
+    return {
+      id: d.id,
+      round: fixture.round,
+      a: fixture.a,
+      b: fixture.b,
+      status: fixture.status,
+    };
+  });
 
-  const { players, scaleMax } = computeStandings(rawPlayers, results, T, payoutPct, buyin, round);
+  const { players, scaleMax } = computeStandings(rawPlayers, results, T, payoutPct, buyin, round, fixtures);
   const serialized = players.map((p) => ({
     ...p,
     teams: p.teams.map((t) => ({

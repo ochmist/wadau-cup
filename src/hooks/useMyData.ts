@@ -39,7 +39,7 @@ export function useMyData(): { player: PlayerDoc | null; loading: boolean } {
     const mock: PlayerDoc = {
       name: mockMe.name,
       short: mockMe.short,
-      phone: "+254 712 000 001",
+      phone: "",
       paid: mockMe.paid,
       approvalStatus: "approved",
       hasDrafted: true,

@@ -32,7 +32,7 @@ import type { WadauClaims } from "./types";
 
 // ── Emulator connection (client-side, before any auth listener) ───────────
 // This must happen before onAuthStateChanged is registered.
-if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_USE_EMULATOR === "true") {
+if (typeof window !== "undefined" && auth && db && process.env.NEXT_PUBLIC_USE_EMULATOR === "true") {
   const a = auth as unknown as Record<string, boolean>;
   if (!a.__emulatorConnected) {
     try {
@@ -92,6 +92,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(EMPTY);
 
   useEffect(() => {
+    if (!auth) {
+      setState({
+        ...EMPTY,
+        ready: true,
+        user: { uid: "BR" } as User,
+        hasResetPassword: true,
+        hasDrafted: true,
+        playerExists: true,
+      });
+      return;
+    }
     let playerUnsub: (() => void) | null = null;
     let playerReadyTimeout: ReturnType<typeof setTimeout> | null = null;
     let mounted = true;
@@ -211,12 +222,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (cc: string, phone: string, password: string) => {
+    if (!auth) throw new Error("Firebase auth is not configured");
     const email = phoneToEmail(cc, phone);
     await signInWithEmailAndPassword(auth, email, password);
     // onAuthStateChanged handles the state update
   }, []);
 
   const resetPassword = useCallback(async (newPassword: string) => {
+    if (!auth) throw new Error("Firebase auth is not configured");
     if (!auth.currentUser) throw new Error("Not authenticated");
     const email = auth.currentUser.email;
     if (!email) throw new Error("No email on current user");
@@ -260,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    if (!auth) return;
     await signOut(auth);
     // onAuthStateChanged fires with null → state resets to EMPTY + ready:true
   }, []);

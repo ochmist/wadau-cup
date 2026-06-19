@@ -119,6 +119,8 @@ export type PlayerTeam = {
   pts: number;
   rem: number;
   alive: boolean;
+  stageGamesLeft?: number;
+  stagePossiblePoints?: number;
 };
 
 export type Player = {

@@ -18,6 +18,8 @@ export type DisplayPlayer = {
   mover: number;
   points: number;
   ceiling: number;
+  stageGamesLeft?: number;
+  stagePossiblePoints?: number;
   payout: number;
   teams: PlayerTeam[];
 };
@@ -211,11 +213,13 @@ export function CeilingBar({
   points,
   ceiling,
   scaleMax,
+  stageGamesLeft,
   showCaption = true,
 }: {
   points: number;
   ceiling: number;
   scaleMax: number;
+  stageGamesLeft?: number;
   showCaption?: boolean;
 }) {
   const cur = Math.max(0, Math.min(100, (points / scaleMax) * 100));
@@ -229,21 +233,29 @@ export function CeilingBar({
         <div className="wc-bar-tick" style={{ left: "calc(" + cl + "% - 1px)" }} />
       </div>
       {showCaption && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            marginTop: 6,
-          }}
-        >
-          <span className="wc-num" style={{ fontSize: 11, color: "var(--dim)" }}>
-            <span style={{ color: "var(--lime-ink)", fontWeight: 600 }}>{points}</span> now
-          </span>
-          <span className="wc-num" style={{ fontSize: 11, color: "var(--faint)" }}>
-            +{headroom} left · ceiling {ceiling}
-          </span>
-        </div>
+        <>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "baseline",
+              marginTop: 6,
+              gap: 10,
+            }}
+          >
+            <span className="wc-num" style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--lime-ink)", fontWeight: 600 }}>{points}</span> now
+            </span>
+            <span className="wc-num" style={{ fontSize: 11, color: "var(--faint)", whiteSpace: "nowrap" }}>
+              +{headroom} left · ceiling {ceiling}
+            </span>
+          </div>
+          {typeof stageGamesLeft === "number" && (
+            <div className="wc-num" style={{ marginTop: 3, fontSize: 10.5, color: "var(--faint)", textAlign: "right" }}>
+              {stageGamesLeft} current-stage {stageGamesLeft === 1 ? "game" : "games"} left
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -316,6 +328,7 @@ export function MobileRow({
   last,
   moneyCutoffPoints,
   hidePicks = false,
+  rowId,
   onClick,
 }: {
   p: DisplayPlayer;
@@ -323,6 +336,7 @@ export function MobileRow({
   last?: boolean;
   moneyCutoffPoints?: number | null;
   hidePicks?: boolean;
+  rowId?: string;
   onClick?: () => void;
 }) {
   const ranked = p.rank > 0;
@@ -335,7 +349,7 @@ export function MobileRow({
     cursor: onClick ? "pointer" : "default",
   };
   return (
-    <div style={rowStyle} onClick={onClick}>
+    <div id={rowId} style={rowStyle} onClick={onClick}>
       {money && (
         <div
           style={{
@@ -435,7 +449,7 @@ export function MobileRow({
       </div>
       {/* ceiling bar full width */}
       <div style={{ marginTop: 13 }}>
-        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} />}
+        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} stageGamesLeft={p.stageGamesLeft} />}
       </div>
     </div>
   );
@@ -450,6 +464,7 @@ export function DesktopRow({
   last,
   moneyCutoffPoints,
   hidePicks = false,
+  rowId,
   onClick,
 }: {
   p: DisplayPlayer;
@@ -457,12 +472,14 @@ export function DesktopRow({
   last?: boolean;
   moneyCutoffPoints?: number | null;
   hidePicks?: boolean;
+  rowId?: string;
   onClick?: () => void;
 }) {
   const ranked = p.rank > 0;
   const money = ranked && p.rank <= 3;
   return (
     <div
+      id={rowId}
       onClick={onClick}
       style={{
         display: "grid",
@@ -520,7 +537,7 @@ export function DesktopRow({
       </div>
       {/* ceiling bar */}
       <div>
-        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} />}
+        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} stageGamesLeft={p.stageGamesLeft} />}
       </div>
       {/* points */}
       <div style={{ textAlign: "right" }}>

@@ -65,6 +65,14 @@ export type RawResult = {
   sb?: number | null;
 };
 
+export type RawFixture = {
+  id: string;
+  round: string;
+  a: string | null;
+  b: string | null;
+  status?: string | null;
+};
+
 export type RawPick = {
   uid: string;
   name: string;
@@ -92,9 +100,13 @@ export type ComputedPlayer = {
     pts: number;
     rem: number;
     alive: boolean;
+    stageGamesLeft: number;
+    stagePossiblePoints: number;
   }[];
   points: number;
   ceiling: number;
+  stageGamesLeft: number;
+  stagePossiblePoints: number;
   rank: number;
   mover: number;
   payout: number;
@@ -130,6 +142,7 @@ export function computeStandings(
   payoutPct: [number, number, number],
   buyin: number,
   tournamentRound = "Group",
+  fixtures: RawFixture[] = [],
 ): { players: ComputedPlayer[]; scaleMax: number } {
   // Build a map of team code → { pts earned, alive }
   const teamPts: Record<string, number> = {};
@@ -137,6 +150,7 @@ export function computeStandings(
   const currentRound: Record<string, string> = {};
   const groupMatchesPlayed: Record<string, number> = {};
   const fallbackRound = roundLabel(tournamentRound);
+  const completedResultIds = new Set(results.filter((r) => r.win).map((r) => r.id));
 
   for (const r of results) {
     if (!r.win) continue;
@@ -168,11 +182,43 @@ export function computeStandings(
     }
   }
 
+  function openFixturesForTeam(code: string, round: string) {
+    return fixtures.filter((fixture) => {
+      if (roundLabel(fixture.round) !== round) return false;
+      if (fixture.a !== code && fixture.b !== code) return false;
+      if (completedResultIds.has(fixture.id)) return false;
+      return fixture.status !== "finished";
+    });
+  }
+
+  function groupGamesLeftForTeam(code: string) {
+    const scheduled = openFixturesForTeam(code, "Group").length;
+    if (scheduled > 0 || fixtures.length > 0) return scheduled;
+    return Math.max(0, 3 - (groupMatchesPlayed[code] ?? 0));
+  }
+
+  function stageGamesLeftForTeam(code: string, alive: boolean) {
+    if (!alive) return 0;
+    const stage = fallbackRound;
+    if (stage === "Group") return groupGamesLeftForTeam(code);
+    return openFixturesForTeam(code, stage).length;
+  }
+
+  function stagePossiblePointsForTeam(code: string, tier: Tier, alive: boolean) {
+    if (!alive) return 0;
+    const games = stageGamesLeftForTeam(code, alive);
+    if (games <= 0) return 0;
+    const stage = fallbackRound;
+    if (stage === "Group") return games * pointsForResult("Group · Win", tier);
+    const key = stage === "Final" ? "Final · Champion" : `${stage} · Win`;
+    return games * pointsForResult(key, tier);
+  }
+
   function remainingForTeam(code: string, tier: Tier, alive: boolean) {
     if (!alive) return 0;
     const round = currentRound[code] ?? fallbackRound;
     if (round === "Group") {
-      const groupWinsLeft = Math.max(0, 3 - (groupMatchesPlayed[code] ?? 0));
+      const groupWinsLeft = groupGamesLeftForTeam(code);
       return (
         groupWinsLeft * pointsForResult("Group · Win", tier) +
         (REMAINING_FROM_ROUND["Round of 32"]?.[tier] ?? 0)
@@ -191,10 +237,14 @@ export function computeStandings(
         const pts = teamPts[code] ?? 0;
         const alive = !eliminated.has(code);
         const rem = remainingForTeam(code, tier, alive);
-        return { tier, code, pts, rem, alive };
+        const stageGamesLeft = stageGamesLeftForTeam(code, alive);
+        const stagePossiblePoints = stagePossiblePointsForTeam(code, tier, alive);
+        return { tier, code, pts, rem, alive, stageGamesLeft, stagePossiblePoints };
       });
     const points = teams.reduce((s, t) => s + t.pts, 0);
     const ceiling = points + teams.reduce((s, t) => s + t.rem, 0);
+    const stageGamesLeft = teams.reduce((s, t) => s + t.stageGamesLeft, 0);
+    const stagePossiblePoints = teams.reduce((s, t) => s + t.stagePossiblePoints, 0);
     const aliveCount = teams.filter((t) => t.alive).length;
     return {
       uid: p.uid,
@@ -208,6 +258,8 @@ export function computeStandings(
       teams,
       points,
       ceiling,
+      stageGamesLeft,
+      stagePossiblePoints,
       rank: 0,
       mover: 0,
       payout: 0,

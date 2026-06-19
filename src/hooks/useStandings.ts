@@ -33,7 +33,13 @@ function mockStandings(): UseStandingsResult {
     mover: p.mover,
     payout: p.payout,
     aliveCount: p.aliveCount,
-    teams: p.teams,
+    stageGamesLeft: p.teams.filter((team) => team.alive).length,
+    stagePossiblePoints: p.teams.filter((team) => team.alive).length,
+    teams: p.teams.map((team) => ({
+      ...team,
+      stageGamesLeft: team.alive ? 1 : 0,
+      stagePossiblePoints: team.alive ? 1 : 0,
+    })),
     me: p.me,
   })) as SerializedPlayer[];
   return { players, scaleMax: WADAU.scaleMax, round: WADAU.round, computedAt: null, loading: false };
