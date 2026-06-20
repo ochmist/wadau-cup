@@ -170,6 +170,38 @@ body {
   padding-left: 5px;
 }
 
+.wc-rk-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-lime);
+  background: var(--lime);
+  border: none;
+  border-radius: 999px;
+  padding: 7px 13px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px -8px var(--lime-line);
+}
+
+@media (max-width: 899px) {
+  .wc-worldcup-page {
+    padding: 20px 18px 72px !important;
+  }
+
+  .wc-worldcup-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .wc-worldcup-groups {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 /* flag chips */
 .wc-flags {
   display: flex;

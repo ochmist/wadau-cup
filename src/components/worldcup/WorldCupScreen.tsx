@@ -102,20 +102,20 @@ export function WorldCupScreen() {
   const loading = fixturesLoading || resultsLoading;
 
   return (
-    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 24px 64px" }}>
+    <div className="wc-worldcup-page" style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 24px 64px" }}>
       <PageHead title="World Cup table" sub="Group tables, results, and upcoming fixtures from live tournament data." />
       {loading ? (
         <div style={{ color: "var(--dim)", padding: 32 }}>Loading tournament data…</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 360px)", gap: 18, alignItems: "start" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+        <div className="wc-worldcup-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 360px)", gap: 18, alignItems: "start" }}>
+          <div className="wc-worldcup-groups" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
             {rowsByGroup.length ? rowsByGroup.map(({ group, rows }) => (
               <div key={group} className="wc-card" style={{ overflow: "hidden" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "15px 16px", borderBottom: "1px solid var(--line)" }}>
                   <SectionLabel>Group {group}</SectionLabel>
                   <span className="wc-num" style={{ fontSize: 12, color: "var(--dim)" }}>{rows.length} teams</span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 34px 34px 34px 42px", gap: 8, padding: "9px 12px", borderBottom: "1px solid var(--line)" }}>
+                <div className="wc-worldcup-table-row" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 34px 34px 34px 42px", gap: 8, padding: "9px 12px", borderBottom: "1px solid var(--line)" }}>
                   {["Team", "P", "GD", "GF", "Pts"].map((label, index) => (
                     <span key={label} className="wc-eyebrow" style={{ textAlign: index === 0 ? "left" : "right" }}>{label}</span>
                   ))}
@@ -128,7 +128,7 @@ export function WorldCupScreen() {
                       href={teamHref(row.code)}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr 34px 34px 34px 42px",
+                        gridTemplateColumns: "minmax(0, 1fr) 34px 34px 34px 42px",
                         gap: 8,
                         padding: "10px 12px",
                         color: "var(--text)",
@@ -157,9 +157,9 @@ export function WorldCupScreen() {
               <SectionLabel>Next fixtures</SectionLabel>
               <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
                 {nextFixtures.map((fixture) => (
-                  <Link key={fixture.id} href={fixtureHref(fixture.id)} style={{ color: "var(--text)", textDecoration: "none", display: "grid", gap: 4, padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 750 }}>{T[fixture.a ?? ""]?.f ?? "•"} {T[fixture.a ?? ""]?.n ?? fixture.aName} vs {T[fixture.b ?? ""]?.f ?? "•"} {T[fixture.b ?? ""]?.n ?? fixture.bName}</span>
+                  <Link key={fixture.id} href={fixtureHref(fixture.id)} style={{ color: "var(--text)", textDecoration: "none", display: "grid", gap: 4, padding: "10px 0", borderBottom: "1px solid var(--line)", minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, minWidth: 0 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 750, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{T[fixture.a ?? ""]?.f ?? "•"} {T[fixture.a ?? ""]?.n ?? fixture.aName} vs {T[fixture.b ?? ""]?.f ?? "•"} {T[fixture.b ?? ""]?.n ?? fixture.bName}</span>
                       <span className="wc-num" style={{ fontSize: 11, color: "var(--dim)", whiteSpace: "nowrap" }}>{kickoffLabel(fixture.kickoffAt)}</span>
                     </div>
                     <span className="wc-eyebrow">{fixtureStageLabel(fixture.round, fixture.group)}</span>
@@ -172,8 +172,8 @@ export function WorldCupScreen() {
               <SectionLabel>Recent results</SectionLabel>
               <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
                 {recentResults.map((result) => (
-                  <Link key={result.id} href={fixtureHref(result.id)} style={{ color: "var(--text)", textDecoration: "none", display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 750 }}>{T[result.a]?.f ?? "•"} {T[result.a]?.n ?? result.a} {result.sa}-{result.sb} {T[result.b]?.f ?? "•"} {T[result.b]?.n ?? result.b}</span>
+                  <Link key={result.id} href={fixtureHref(result.id)} style={{ color: "var(--text)", textDecoration: "none", display: "flex", justifyContent: "space-between", gap: 10, padding: "10px 0", borderBottom: "1px solid var(--line)", minWidth: 0 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 750, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{T[result.a]?.f ?? "•"} {T[result.a]?.n ?? result.a} {result.sa}-{result.sb} {T[result.b]?.f ?? "•"} {T[result.b]?.n ?? result.b}</span>
                     <span className="wc-eyebrow">{result.round}</span>
                   </Link>
                 ))}
@@ -186,4 +186,3 @@ export function WorldCupScreen() {
     </div>
   );
 }
-

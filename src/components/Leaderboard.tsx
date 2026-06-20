@@ -152,7 +152,26 @@ function PaymentInfoCard({ buyin }: { buyin: number }) {
   );
 }
 
-function MyStandingJump({ player, onJump }: { player: SerializedPlayer; onJump: () => void }) {
+function MyStandingJump({
+  player,
+  moneyCutoffPoints,
+  onJump,
+}: {
+  player: SerializedPlayer;
+  moneyCutoffPoints?: number | null;
+  onJump: () => void;
+}) {
+  const ranked = player.rank > 0;
+  const moneyGap = ranked && player.rank > 3 && typeof moneyCutoffPoints === "number"
+    ? Math.max(1, moneyCutoffPoints - player.points + 1)
+    : null;
+  const context = !ranked
+    ? "unranked"
+    : player.rank <= 3
+      ? "in the money"
+      : moneyGap
+        ? `${moneyGap} from money`
+        : "outside money";
   return (
     <button
       type="button"
@@ -161,9 +180,9 @@ function MyStandingJump({ player, onJump }: { player: SerializedPlayer; onJump: 
       style={{
         width: "100%",
         borderColor: "var(--lime-line)",
-        background: "var(--lime-soft)",
+        background: "var(--surface)",
         color: "var(--text)",
-        padding: "11px 14px",
+        padding: "10px 14px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -174,18 +193,25 @@ function MyStandingJump({ player, onJump }: { player: SerializedPlayer; onJump: 
       }}
     >
       <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        <span className="wc-avatar" style={{ width: 30, height: 30, borderRadius: 9 }}>{player.short}</span>
+        <span className="wc-num" style={{ fontSize: 18, fontWeight: 600, color: player.rank > 0 && player.rank <= 3 ? "var(--gold)" : "var(--text)" }}>
+          {ranked ? player.rank : "—"}
+        </span>
+        <span className="wc-avatar" style={{ width: 28, height: 28, borderRadius: 8, background: "var(--lime)", color: "var(--on-lime)" }}>{player.short}</span>
         <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            Your spot · {player.rank > 0 ? `P${player.rank}` : "unranked"}
+          <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <span style={{ display: "block", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              You
+            </span>
+            <Mover value={player.mover} showZero={false} />
           </span>
-          <span className="wc-num" style={{ display: "block", marginTop: 2, fontSize: 11, color: "var(--dim)" }}>
-            {player.points} pts · ceiling {player.ceiling}
+          <span className="wc-num" style={{ display: "block", marginTop: 1, fontSize: 10.5, color: "var(--dim)" }}>
+            {player.points} pts · {context}
           </span>
         </span>
       </span>
-      <span className="wc-num" style={{ fontSize: 11, fontWeight: 700, color: "var(--lime-ink)", whiteSpace: "nowrap" }}>
-        Jump to row ↓
+      <span className="wc-rk-jump" style={{ flex: "none" }}>
+        Jump to me
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 11V3M3.5 6.5L7 3l3.5 3.5" /></svg>
       </span>
     </button>
   );
@@ -388,7 +414,7 @@ export function Leaderboard() {
     updated: formatUpdated(computedAt),
   };
   const currentVisiblePlayer = user ? W.players.find((p) => p.uid === user.uid || p.me) : null;
-  const showMyJump = Boolean(currentVisiblePlayer && !viewerPending && currentVisiblePlayer.rank > 3);
+  const showMyJump = Boolean(currentVisiblePlayer && !viewerPending);
   const jumpToMyRow = () => {
     const rows = [
       document.getElementById("leaderboard-me-row-desktop"),
@@ -461,7 +487,7 @@ export function Leaderboard() {
       >
         {/* main table */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-        {showMyJump && currentVisiblePlayer && <MyStandingJump player={currentVisiblePlayer} onJump={jumpToMyRow} />}
+        {showMyJump && currentVisiblePlayer && <MyStandingJump player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} />}
         <div className="wc-card" style={{ overflow: "hidden", minWidth: 0 }}>
           <div
             style={{
@@ -686,11 +712,6 @@ export function Leaderboard() {
       {/* ============ MOBILE ============ */}
       <div className="wc-mobile-only" style={{ display: "block" }}>
         <div style={{ padding: "0 18px" }}>
-          {showMyJump && currentVisiblePlayer && (
-            <div style={{ marginTop: 14 }}>
-              <MyStandingJump player={currentVisiblePlayer} onJump={jumpToMyRow} />
-            </div>
-          )}
           {/* pot card */}
           <div
             className="wc-card"
@@ -825,15 +846,14 @@ export function Leaderboard() {
         </div>
 
         {/* list */}
-        <div>
+        <div style={{ padding: "0 18px" }}>
           {noPlayers ? (
-            <div style={{ padding: "0 18px 22px" }}>
-              <div className="wc-card">
-                <LeaderboardEmptyState />
-              </div>
+            <div className="wc-card">
+              <LeaderboardEmptyState />
             </div>
           ) : (
-            W.players.map((p, i) => {
+            <div className="wc-card" style={{ overflow: "hidden", padding: 0 }}>
+              {W.players.map((p, i) => {
               const rowKey = playerKey(p, "mobile", i);
               const hidden = (viewerPending && !p.me) || (!picksArePublic && !p.me);
               return (
@@ -852,9 +872,28 @@ export function Leaderboard() {
                 )}
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
-            );})
+            );})}
+            </div>
           )}
         </div>
+        {showMyJump && currentVisiblePlayer && (
+          <>
+            <div style={{ height: 88 }} aria-hidden />
+            <div
+              style={{
+                position: "fixed",
+                left: 14,
+                right: 14,
+                bottom: 84,
+                zIndex: 38,
+                background: "linear-gradient(180deg, transparent, var(--bg) 42%)",
+                paddingTop: 18,
+              }}
+            >
+              <MyStandingJump player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} />
+            </div>
+          </>
+        )}
       </div>
     </>
   );

@@ -294,13 +294,13 @@ export function PageShell({ children }: { children: ReactNode }) {
           maxWidth: "100vw",
           contain: "paint",
           zIndex: 40,
-          display: "flex",
-          gap: 4,
-          overflowX: "auto",
-          overscrollBehaviorX: "contain",
+          display: "grid",
+          gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))`,
+          gap: 2,
+          overflow: "hidden",
           borderTop: "1px solid var(--line)",
           background: "var(--surface)",
-          padding: "10px 8px 22px",
+          padding: "10px 6px 22px",
         }}
       >
         {mobileNav.map((item) => {
@@ -310,8 +310,8 @@ export function PageShell({ children }: { children: ReactNode }) {
               key={item.href}
               href={item.href}
               style={{
-                flex: "0 0 68px",
                 position: "relative",
+                minWidth: 0,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -332,7 +332,7 @@ export function PageShell({ children }: { children: ReactNode }) {
               >
                 <path d={item.d} />
               </svg>
-              <span style={{ fontSize: 10.5, fontWeight: active ? 600 : 500, letterSpacing: "0.01em" }}>
+              <span style={{ fontSize: 10, fontWeight: active ? 600 : 500, letterSpacing: "0.01em", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {item.label}
               </span>
               {item.href === "/banter" && banterCount > 0 && (
