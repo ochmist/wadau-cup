@@ -6,6 +6,7 @@
    PageShell; this renders only the screen body for both layouts. */
 
 import { Fragment, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CeilingBar,
@@ -25,6 +26,7 @@ import type { SerializedPlayer } from "@/lib/types";
 import { usePool } from "@/hooks/usePool";
 import { useCountdown } from "@/lib/countdown";
 import { PAYMENT_RECIPIENTS, PAYMENT_WHATSAPP } from "@/lib/payment";
+import { TeamEntityLink } from "@/components/entity-links";
 
 function playerKey(p: { uid?: string; name: string }, scope: string, index: number) {
   return `${scope}-${p.uid ?? p.name}-${index}`;
@@ -189,6 +191,96 @@ function MyStandingJump({ player, onJump }: { player: SerializedPlayer; onJump: 
   );
 }
 
+function RowDrawer({
+  player,
+  scaleMax,
+  moneyCutoffPoints,
+  onProfile,
+}: {
+  player: SerializedPlayer;
+  scaleMax: number;
+  moneyCutoffPoints: number | null;
+  onProfile: () => void;
+}) {
+  const headroom = Math.max(0, player.ceiling - player.points);
+  const aliveTeams = player.teams.filter((team) => team.alive);
+  const moneyGap = player.rank > 0 && player.rank > 3 && typeof moneyCutoffPoints === "number"
+    ? Math.max(1, moneyCutoffPoints - player.points + 1)
+    : null;
+  return (
+    <div style={{ borderBottom: "1px solid var(--line)", background: "var(--surface-2)", padding: "14px 18px 16px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9 }}>
+            {[
+              ["Now", player.points],
+              ["Still possible", headroom],
+              ["Ceiling", player.ceiling],
+            ].map(([label, value]) => (
+              <div key={label} className="wc-card" style={{ padding: "10px 11px", background: "var(--surface)" }}>
+                <div className="wc-eyebrow" style={{ fontSize: 9 }}>{label}</div>
+                <div className="wc-num" style={{ fontSize: 20, fontWeight: 800, color: label === "Still possible" ? "var(--lime-ink)" : "var(--text)", marginTop: 3 }}>
+                  {value}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <CeilingBar points={player.points} ceiling={player.ceiling} scaleMax={scaleMax} />
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 12 }}>
+            {player.teams.map((team) => (
+              <TeamEntityLink key={`${team.tier}-${team.code}`} team={team}>
+                <span
+                  className="wc-pill"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "5px 8px",
+                    fontSize: 10.5,
+                    opacity: team.alive ? 1 : 0.55,
+                  }}
+                >
+                  <span>{team.flag}</span>
+                  <span>{team.tier}</span>
+                  <span className="wc-num" style={{ color: team.alive ? "var(--lime-ink)" : "var(--faint)" }}>
+                    {team.pts}+{team.alive ? team.rem : 0}
+                  </span>
+                </span>
+              </TeamEntityLink>
+            ))}
+          </div>
+          <div style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.45, marginTop: 11 }}>
+            {aliveTeams.length
+              ? `${aliveTeams.length} live ${aliveTeams.length === 1 ? "team" : "teams"} can still add points.`
+              : "No teams can add more points; this ceiling is final."}
+            {moneyGap ? ` ${moneyGap} ${moneyGap === 1 ? "point" : "points"} from the payout line.` : ""}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onProfile();
+          }}
+          className="wc-pill"
+          style={{
+            cursor: "pointer",
+            color: "var(--lime-ink)",
+            borderColor: "var(--lime-line)",
+            background: "transparent",
+            fontFamily: "inherit",
+            whiteSpace: "nowrap",
+          }}
+        >
+          View full profile →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Leaderboard() {
   const { user, approvalStatus } = useAuth();
   const { players, scaleMax, round, computedAt, loading } = useStandings(user?.uid, approvalStatus !== "pending");
@@ -197,9 +289,14 @@ export function Leaderboard() {
   const countdown = useCountdown();
   const [showPaymentInfo, setShowPaymentInfo] = useState(false);
   const [prizeExpanded, setPrizeExpanded] = useState(false);
+  const [openPlayerKey, setOpenPlayerKey] = useState<string | null>(null);
   const picksArePublic = countdown.ready && countdown.isLocked;
   const router = useRouter();
   const goToPlayer = (name: string) => router.push(`/player/${encodeURIComponent(name)}`);
+  const togglePlayer = (p: SerializedPlayer, scope: string, index: number) => {
+    const key = playerKey(p, scope, index);
+    setOpenPlayerKey((current) => current === key ? null : key);
+  };
   const myTeams = enrichPlayerTeams(myPlayer).map((t) => ({ ...t, alive: t.alive }));
   const myPoints = myTeams.reduce((sum, team) => sum + team.pts, 0);
   const myCeiling = myPoints + myTeams.reduce((sum, team) => sum + (team.alive ? team.rem : 0), 0);
@@ -383,6 +480,9 @@ export function Leaderboard() {
             <span className="wc-pill" style={{ color: "var(--text)", borderColor: "var(--line-2)" }}>
               {W.round}
             </span>
+            <Link href="/world-cup" style={{ color: "var(--lime-ink)", fontSize: 12.5, fontWeight: 800, textDecoration: "none", whiteSpace: "nowrap" }}>
+              World Cup table →
+            </Link>
           </div>
           {/* column header */}
           <div
@@ -407,20 +507,26 @@ export function Leaderboard() {
           {noPlayers ? (
             <LeaderboardEmptyState />
           ) : (
-            W.players.map((p, i) => (
-              <Fragment key={playerKey(p, "desktop", i)}>
+            W.players.map((p, i) => {
+              const rowKey = playerKey(p, "desktop", i);
+              const hidden = (viewerPending && !p.me) || (!picksArePublic && !p.me);
+              return (
+              <Fragment key={rowKey}>
                 <DesktopRow
                   p={p}
                   scaleMax={W.scaleMax}
                   last={i === W.players.length - 1}
                   moneyCutoffPoints={moneyCutoffPoints}
-                  hidePicks={(viewerPending && !p.me) || (!picksArePublic && !p.me)}
+                  hidePicks={hidden}
                   rowId={p.me ? "leaderboard-me-row-desktop" : undefined}
-                  onClick={viewerPending && !p.me ? undefined : () => goToPlayer(p.name)}
+                  onClick={hidden ? undefined : () => togglePlayer(p, "desktop", i)}
                 />
+                {!hidden && openPlayerKey === rowKey && (
+                  <RowDrawer player={p} scaleMax={W.scaleMax} moneyCutoffPoints={moneyCutoffPoints} onProfile={() => goToPlayer(p.name)} />
+                )}
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
-            ))
+            );})
           )}
         </div>
         </div>
@@ -501,6 +607,9 @@ export function Leaderboard() {
               ))}
             </div>}
           </div>
+          <Link href="/world-cup" className="wc-card" style={{ padding: "14px 18px", color: "var(--lime-ink)", textDecoration: "none", fontSize: 13.5, fontWeight: 800 }}>
+            World Cup table →
+          </Link>
 
           {/* biggest mover */}
           <div className="wc-card" style={{ padding: "18px 20px" }}>
@@ -692,6 +801,9 @@ export function Leaderboard() {
               ))}
             </div>}
           </div>
+          <Link href="/world-cup" className="wc-card" style={{ display: "block", marginTop: 12, padding: "12px 14px", color: "var(--lime-ink)", textDecoration: "none", fontSize: 13, fontWeight: 800 }}>
+            World Cup table →
+          </Link>
 
           {/* round status row */}
           <div
@@ -721,20 +833,26 @@ export function Leaderboard() {
               </div>
             </div>
           ) : (
-            W.players.map((p, i) => (
-              <Fragment key={playerKey(p, "mobile", i)}>
+            W.players.map((p, i) => {
+              const rowKey = playerKey(p, "mobile", i);
+              const hidden = (viewerPending && !p.me) || (!picksArePublic && !p.me);
+              return (
+              <Fragment key={rowKey}>
                 <MobileRow
                   p={p}
                   scaleMax={W.scaleMax}
                   last={i === W.players.length - 1}
                   moneyCutoffPoints={moneyCutoffPoints}
-                  hidePicks={(viewerPending && !p.me) || (!picksArePublic && !p.me)}
+                  hidePicks={hidden}
                   rowId={p.me ? "leaderboard-me-row-mobile" : undefined}
-                  onClick={viewerPending && !p.me ? undefined : () => goToPlayer(p.name)}
+                  onClick={hidden ? undefined : () => togglePlayer(p, "mobile", i)}
                 />
+                {!hidden && openPlayerKey === rowKey && (
+                  <RowDrawer player={p} scaleMax={W.scaleMax} moneyCutoffPoints={moneyCutoffPoints} onProfile={() => goToPlayer(p.name)} />
+                )}
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
-            ))
+            );})
           )}
         </div>
       </div>

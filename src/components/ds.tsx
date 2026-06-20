@@ -6,6 +6,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { fmtK, fmtKES, type PlayerTeam } from "@/lib/data";
+import { TeamEntityLink } from "@/components/entity-links";
 
 // Display-only player shape — a strict subset used by leaderboard rows.
 // Both the legacy Player (data.ts) and SerializedPlayer (types.ts) satisfy this.
@@ -136,41 +137,42 @@ export function FlagRow({
   return (
     <div className="wc-flags">
       {orderedTeams.map((t, i) => (
-        <span
-          key={t.code + t.tier}
-          className={"wc-flag " + (t.alive ? "alive" : "out")}
-          onClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            setSel(sel === i ? null : i);
-          }}
-          style={
-            size
-              ? { width: size, height: size, fontSize: Math.round(size * 0.66) }
-              : undefined
-          }
-        >
-          {t.flag}
-          {sel === i && (
-            <span
-              className="wc-flag-tip"
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tip-fg)" }}>
-                {t.name}
-              </span>
+        <TeamEntityLink key={t.code + t.tier} team={t} title={`${t.name} · Tier ${t.tier}`}>
+          <span
+            className={"wc-flag " + (t.alive ? "alive" : "out")}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setSel(sel === i ? null : i);
+            }}
+            style={
+              size
+                ? { width: size, height: size, fontSize: Math.round(size * 0.66) }
+                : undefined
+            }
+          >
+            {t.flag}
+            {sel === i && (
               <span
-                className="wc-num"
-                style={{
-                  fontSize: 10.5,
-                  color: t.alive ? "var(--lime)" : "var(--down)",
-                }}
+                className="wc-flag-tip"
+                onPointerDown={(e) => e.stopPropagation()}
               >
-                {t.tier} · {t.alive ? t.pts + " pts" : "out"}
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--tip-fg)" }}>
+                  {t.name}
+                </span>
+                <span
+                  className="wc-num"
+                  style={{
+                    fontSize: 10.5,
+                    color: t.alive ? "var(--lime)" : "var(--down)",
+                  }}
+                >
+                  {t.tier} · {t.alive ? t.pts + " pts" : "out"}
+                </span>
               </span>
-            </span>
-          )}
-        </span>
+            )}
+          </span>
+        </TeamEntityLink>
       ))}
     </div>
   );
@@ -449,7 +451,7 @@ export function MobileRow({
       </div>
       {/* ceiling bar full width */}
       <div style={{ marginTop: 13 }}>
-        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} stageGamesLeft={p.stageGamesLeft} />}
+        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} />}
       </div>
     </div>
   );
@@ -537,7 +539,7 @@ export function DesktopRow({
       </div>
       {/* ceiling bar */}
       <div>
-        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} stageGamesLeft={p.stageGamesLeft} />}
+        {hidePicks ? <HiddenUntilLock /> : <CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} />}
       </div>
       {/* points */}
       <div style={{ textAlign: "right" }}>

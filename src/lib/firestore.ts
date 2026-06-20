@@ -16,7 +16,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db, POOL_ID } from "./firebase";
-import type { PlayerDoc, StandingsDoc, JoinRequestDoc, PoolDoc, FixtureDoc, LiveStateDoc, SyncStatusDoc } from "./types";
+import type { PlayerDoc, StandingsDoc, JoinRequestDoc, PoolDoc, FixtureDoc, LiveStateDoc, SyncStatusDoc, TeamProfileDoc } from "./types";
 import type { ResultDoc } from "./types";
 import { draftRemainingByTier, type Tier } from "./data";
 
@@ -36,6 +36,7 @@ const standingsRef = () => doc(db, "pools", POOL_ID, "standings", "current");
 const resultsCol = () => collection(db, "pools", POOL_ID, "results");
 const fixturesCol = () => collection(db, "pools", POOL_ID, "fixtures");
 const liveStateCol = () => collection(db, "pools", POOL_ID, "liveState");
+const teamsCol = () => collection(db, "pools", POOL_ID, "teams");
 const syncStatusRef = () => doc(db, "pools", POOL_ID, "sync", "status");
 const joinRequestsCol = () => collection(db, "joinRequests");
 
@@ -158,6 +159,22 @@ export function subscribeLiveState(
     (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as LiveStateDoc), id: d.id }))),
     (err) => {
       logSubscriptionError("[subscribeLiveState]", err);
+      onError?.(err);
+    },
+  );
+}
+
+export type TeamProfileWithId = TeamProfileDoc & { id: string };
+
+export function subscribeTeamProfiles(
+  cb: (data: TeamProfileWithId[]) => void,
+  onError?: (err: Error) => void,
+): Unsubscribe {
+  return onSnapshot(
+    teamsCol(),
+    (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as TeamProfileDoc), id: d.id }))),
+    (err) => {
+      logSubscriptionError("[subscribeTeamProfiles]", err);
       onError?.(err);
     },
   );

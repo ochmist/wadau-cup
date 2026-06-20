@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Wadau Cup — Leaderboard & Profile Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style> html, body { margin:0; padding:0; background:#07090d; } * { -webkit-tap-highlight-color: transparent; } </style></head>
+<body><div id="root"></div>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="wadau-data.js"></script><script src="wadau-data2.js"></script><script src="wadau-livematch.js"></script><script src="wadau-rank.js"></script><script src="wadau-teaminfo.js"></script><script src="wadau-squads.js"></script><script src="wadau-worldcup.js"></script>
+<script type="text/babel" src="wadau-components.jsx"></script>
+<script type="text/babel" src="wadau-ui.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="wadau-rank.jsx"></script>
+<script type="text/babel" src="wadau-rank-screens.jsx"></script>
+<script type="text/babel" src="wadau-profile2.jsx"></script>
+<script type="text/babel" src="wadau-team.jsx"></script>
+<script type="text/babel" src="wadau-worldcup.jsx"></script>
+<script type="text/babel" data-presets="react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "rowTap": "Explain here",
+  "ceilingHint": false
+}/*EDITMODE-END*/;
+
+function Label({ children }) { return <div style={{ fontFamily:'"Geist Mono",monospace', fontSize:12, fontWeight:500, letterSpacing:'0.14em', textTransform:'uppercase', color:'rgba(255,255,255,0.5)', marginBottom:14 }}>{children}</div>; }
+function BrowserFrame({ url, children, h }) {
+  return (<div style={{ width:'100%', height:h, borderRadius:14, overflow:'hidden', background:'#0b0e13', boxShadow:'0 40px 100px -30px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)', display:'flex', flexDirection:'column' }}>
+    <div style={{ height:42, flex:'none', display:'flex', alignItems:'center', gap:14, padding:'0 16px', background:'#15191f', borderBottom:'1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ display:'flex', gap:7 }}>{['#ff5f57','#febc2e','#28c840'].map(c=><span key={c} style={{ width:11, height:11, borderRadius:'50%', background:c }}/>)}</div>
+      <div style={{ flex:1, maxWidth:420, margin:'0 auto', display:'flex', alignItems:'center', gap:8, background:'#0b0e13', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, padding:'5px 12px' }}>
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#7b8694" strokeWidth="1.2"><rect x="2.5" y="5.5" width="7" height="5" rx="1"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5"/></svg>
+        <span style={{ fontFamily:'"Geist Mono",monospace', fontSize:12, color:'#9aa4b2' }}>{url}</span></div><div style={{ width:54 }}/></div>
+    <div style={{ flex:1, minHeight:0 }}>{children}</div></div>);
+}
+function PhoneFrame({ children }) {
+  return (<div style={{ background:'#05070A', borderRadius:46, padding:10, boxShadow:'0 40px 100px -30px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.06)' }}>
+    <div style={{ width:390, height:820, borderRadius:37, overflow:'hidden', position:'relative' }}>
+      <div style={{ height:34, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', flex:'none', position:'relative', zIndex:5 }}></div>
+      <div style={{ position:'absolute', inset:0 }}>{children}</div>
+    </div></div>);
+}
+
+function useNav(initial) {
+  const [stack, setStack] = React.useState([initial]);
+  const cur = stack[stack.length - 1];
+  return {
+    cur,
+    go: (name, params) => setStack((s) => [...s, { name, params }]),
+    back: () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)),
+  };
+}
+
+function FrameApp({ mode, initial, initialTheme, tweaks }) {
+  const nav = useNav(initial);
+  const [theme, setTheme] = React.useState(initialTheme || 'dark');
+  const onTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  const Leader = mode === 'desktop' ? RankLeaderboardDesktop : RankLeaderboardMobile;
+  return (
+    <div className={'wc wc-' + theme} style={{ background:'var(--bg)', height:'100%', width:'100%' }}>
+      {nav.cur.name === 'team'
+        ? <RankTeam mode={mode} nav={nav} params={nav.cur.params} theme={theme} onTheme={onTheme} />
+        : nav.cur.name === 'worldcup'
+        ? <WorldCupScreen mode={mode} nav={nav} theme={theme} onTheme={onTheme} />
+        : nav.cur.name === 'player'
+        ? <RankProfile mode={mode} nav={nav} params={nav.cur.params} theme={theme} onTheme={onTheme} />
+        : <Leader nav={nav} theme={theme} onTheme={onTheme} tweaks={tweaks} />}
+    </div>
+  );
+}
+
+function Page() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const tweaks = { rowTap: t.rowTap === 'Open profile' ? 'profile' : 'expand', ceilingHint: t.ceilingHint };
+  return (
+    <div style={{ minHeight:'100vh', background:'radial-gradient(120% 80% at 50% -10%, #121A2B 0%, #090C12 55%, #06080C 100%)', fontFamily:'"Hanken Grotesk",system-ui,sans-serif', padding:'36px 40px 70px' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:11, marginBottom:8 }}>
+        <div style={{ width:28, height:28, borderRadius:8, background:'#C6FF3A', display:'flex', alignItems:'center', justifyContent:'center' }}><svg width="17" height="17" viewBox="0 0 24 24"><path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 19l-4.8 2.5.9-5.4L4.2 8.7l5.4-.8z" fill="#0A0E13"/></svg></div>
+        <span style={{ color:'#fff', fontWeight:800, fontSize:18, letterSpacing:'-0.01em' }}>Leaderboard & Profile — redesign</span>
+      </div>
+      <div style={{ color:'rgba(255,255,255,0.55)', fontSize:13.5, maxWidth:680, marginBottom:30, lineHeight:1.55 }}>
+        Lean, scannable rows; ceiling math and games-left tucked into an <b style={{ color:'#fff' }}>expand-in-place drawer</b> and the <b style={{ color:'#fff' }}>full profile</b>; and a persistent <b style={{ color:'#fff' }}>“you” anchor</b> so you’re always one tap from your row. Tap any row to explain it; tap a flag for a team. Open <b style={{ color:'#fff' }}>Tweaks</b> to compare a few decisions.
+      </div>
+
+      <Label>Desktop · Leaderboard → tap a row to explain → profile</Label>
+      <BrowserFrame url="wadau.cup/leaderboard" h={840}><FrameApp mode="desktop" initial={{ name:'leaderboard' }} initialTheme="dark" tweaks={tweaks} /></BrowserFrame>
+
+      <div style={{ marginTop:46, display:'flex', gap:54, flexWrap:'wrap' }}>
+        <div><Label>Mobile · Leaderboard</Label><PhoneFrame><FrameApp mode="mobile" initial={{ name:'leaderboard' }} initialTheme="dark" tweaks={tweaks} /></PhoneFrame></div>
+        <div><Label>Mobile · Player profile</Label><PhoneFrame><FrameApp mode="mobile" initial={{ name:'player', params:{ name:'Brayo' } }} initialTheme="light" tweaks={tweaks} /></PhoneFrame></div>
+      </div>
+
+      <TweaksPanel>
+        <TweakSection label="Leaderboard row" />
+        <TweakRadio label="Tapping a row" value={t.rowTap} options={['Explain here', 'Open profile']} onChange={(v) => setTweak('rowTap', v)} />
+        <TweakToggle label="Ceiling hint in row (↗)" value={t.ceilingHint} onChange={(v) => setTweak('ceilingHint', v)} />
+      </TweaksPanel>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Page/>);
+</script></body></html>

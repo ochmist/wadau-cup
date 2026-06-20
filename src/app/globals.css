@@ -22,7 +22,12 @@
   --mono: var(--font-mono), "Geist Mono", "SFMono-Regular", ui-monospace, monospace;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
   text-rendering: optimizeLegibility;
+}
+.wc button,
+.wc a {
+  touch-action: manipulation;
 }
 .wc-num {
   font-family: var(--mono);
@@ -836,13 +841,15 @@ body {
 /* banter feed (ported from wadau-banter.js injectBanterCSS) */
 .wc-bt-input {
   width: 100%;
+  min-width: 0;
   font-family: inherit;
-  font-size: 14.5px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--text);
   background: transparent;
   border: none;
   outline: none;
+  line-height: 1.35;
 }
 .wc-bt-input::placeholder {
   color: var(--faint);
@@ -893,7 +900,7 @@ body {
   background: transparent;
   color: var(--text);
   font-family: inherit;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 650;
 }
 .wc-bt-search-popover input::placeholder {
@@ -1157,6 +1164,12 @@ body {
   background: var(--surface-3);
 }
 @media (max-width: 760px) {
+  .wc input,
+  .wc textarea,
+  .wc select {
+    font-size: 16px;
+  }
+
   .wc-bt-live-stack {
     top: 70px;
     margin-top: 10px;

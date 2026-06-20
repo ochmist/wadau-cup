@@ -205,6 +205,12 @@ function safeId(value: string) {
   return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120);
 }
 
+function estimatedFinishedAt(fixture?: FixtureDoc) {
+  const kickoff = fixture?.kickoffAt ? Date.parse(fixture.kickoffAt) : Number.NaN;
+  if (Number.isNaN(kickoff)) return null;
+  return new Date(kickoff + 2 * 60 * 60 * 1000).toISOString();
+}
+
 type BareBanterEvent = Omit<BanterEventView, "reactions" | "reactionTotal" | "replies" | "replyCount" | "unreadReplyCount">;
 
 function resultEvent(result: ResultDoc, fixture?: FixtureDoc): BareBanterEvent {
@@ -218,6 +224,7 @@ function resultEvent(result: ResultDoc, fixture?: FixtureDoc): BareBanterEvent {
     .map((row) => `${teamName(row.code)} +${row.points}`)
     .join(" · ");
   const fallbackDate = fixture?.kickoffAt ? new Date(fixture.kickoffAt) : new Date();
+  const occurredAt = estimatedFinishedAt(fixture) ?? result.enteredAt;
   return {
     type: "event",
     id: safeId(`result-${result.id}`),
@@ -225,7 +232,7 @@ function resultEvent(result: ResultDoc, fixture?: FixtureDoc): BareBanterEvent {
     accent: "gold",
     title: score,
     sub: points || result.round,
-    occurredAt: timestampIso(result.enteredAt, fallbackDate),
+    occurredAt: timestampIso(occurredAt, fallbackDate),
   };
 }
 
@@ -250,6 +257,9 @@ function topLevelFixtureEvent(fixture: FixtureDoc, live?: LiveStateDoc): BareBan
   const clock = liveMinuteLabel(live);
   const state = isFinished ? "FT" : clock ?? "LIVE";
   const score = hasLiveScore ? `${aFlag} ${a} ${sa}-${sb} ${b} ${bFlag}` : `${aFlag} ${a} vs ${b} ${bFlag}`;
+  const occurredAt = isFinished
+    ? estimatedFinishedAt(fixture) ?? fixture.kickoffAt
+    : live?.updatedAt ?? fixture.lastSyncedAt ?? fixture.kickoffAt;
   return {
     type: "event",
     id: safeId(`fixture-state-${fixture.id}-${isFinished ? "finished" : "live"}`),
@@ -258,7 +268,7 @@ function topLevelFixtureEvent(fixture: FixtureDoc, live?: LiveStateDoc): BareBan
     accent: isFinished ? "gold" : "lime",
     title: `${state} · ${score}`.trim(),
     sub: `${live?.statusLong ?? live?.statusShort ?? fixture.round}${fixture.group ? ` · Group ${fixture.group}` : ""}`,
-    occurredAt: timestampIso(live?.updatedAt ?? fixture.lastSyncedAt, fixture.kickoffAt ? new Date(fixture.kickoffAt) : new Date()),
+    occurredAt: timestampIso(occurredAt, fixture.kickoffAt ? new Date(fixture.kickoffAt) : new Date()),
   };
 }
 

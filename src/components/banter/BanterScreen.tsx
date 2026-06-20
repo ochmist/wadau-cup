@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { TeamEntityLink } from "@/components/entity-links";
 import { useAuth } from "@/lib/auth";
 import {
   BANTER_EMOJI_GROUPS,
@@ -58,10 +59,10 @@ function BanterText({ text, members = [] }: { text: string; members?: BanterMemb
     const code = teamMentionMap[key] ?? teamMentionMap[raw.toLowerCase()];
     if (code && T[code]) {
       parts.push(
-        <span key={`m-${match.index}`} className="wc-bt-team">
+        <TeamEntityLink key={`m-${match.index}`} code={code} stopPropagation={false} className="wc-bt-team">
           <span className="fl">{T[code].f}</span>
           {T[code].n}
-        </span>,
+        </TeamEntityLink>,
       );
     } else {
       const member = members.find((entry) => memberMatchesMentionHandle(raw, entry));
@@ -79,6 +80,10 @@ function BanterText({ text, members = [] }: { text: string; members?: BanterMemb
       {parts}
     </span>
   );
+}
+
+function codeForBanterTeam(side: Pick<MatchEventDetails["home"], "name" | "flag">) {
+  return Object.entries(T).find(([, team]) => team.n === side.name || team.f === side.flag)?.[0] ?? null;
 }
 
 function splitEventTitle(title: string) {
@@ -663,8 +668,12 @@ function LiveMatchThread({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: align === "right" ? "row-reverse" : "row" }}>
-        <span style={{ fontSize: 24, lineHeight: 1 }}>{side.flag}</span>
-        <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{side.name}</span>
+        <TeamEntityLink code={codeForBanterTeam(side)} stopPropagation={false}>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>{side.flag}</span>
+        </TeamEntityLink>
+        <TeamEntityLink code={codeForBanterTeam(side)} stopPropagation={false}>
+          <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{side.name}</span>
+        </TeamEntityLink>
       </div>
     </div>
   );
@@ -680,13 +689,7 @@ function LiveMatchThread({
           boxShadow: live ? "0 0 0 1px var(--lime-line), 0 18px 40px -24px var(--lime-line)" : undefined,
         }}
       >
-        {fixtureHref ? (
-          <Link href={fixtureHref} className="wc-bt-live">
-            <LiveMatchMain event={event} details={details} live={live} TeamSide={TeamSide} />
-          </Link>
-        ) : (
-          <LiveMatchMain event={event} details={details} live={live} TeamSide={TeamSide} />
-        )}
+        <LiveMatchMain event={event} details={details} live={live} fixtureHref={fixtureHref} TeamSide={TeamSide} />
         <div style={{ padding: "12px 16px 14px", borderTop: "1px solid var(--line)" }}>
           <ReactionRow id={event.id} targetType="event" reactions={event.reactions} busy={busyReaction} onReact={onReact} compact />
           {event.replies.length > 0 && !isExpanded ? (
@@ -737,11 +740,13 @@ function LiveMatchMain({
   event,
   details,
   live,
+  fixtureHref,
   TeamSide,
 }: {
   event: BanterEventView;
   details: MatchEventDetails;
   live: boolean;
+  fixtureHref: string | null;
   TeamSide: ({ side, align }: { side: MatchEventDetails["home"]; align: "left" | "right" }) => ReactNode;
 }) {
   return (
@@ -796,12 +801,14 @@ function LiveMatchMain({
         <span style={{ fontSize: 12.5, color: "var(--dim)", flex: 1, lineHeight: 1.4, minWidth: 0 }}>
           {live ? `${details.round || "Live match"} · reply with match banter` : event.sub}
         </span>
-        <span className="wc-bt-open" style={{ fontSize: 12.5, fontWeight: 700, color: live ? "var(--lime-ink)" : "var(--gold)", flex: "none" }}>
-          {live ? "Open match" : "Match report"}
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 8h9M8 4l4 4-4 4" />
-          </svg>
-        </span>
+        {fixtureHref && (
+          <Link href={fixtureHref} className="wc-bt-open" style={{ fontSize: 12.5, fontWeight: 700, color: live ? "var(--lime-ink)" : "var(--gold)", flex: "none", textDecoration: "none" }}>
+            {live ? "Open match" : "Match report"}
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 8h9M8 4l4 4-4 4" />
+            </svg>
+          </Link>
+        )}
       </div>
     </>
   );
@@ -875,7 +882,15 @@ function BanterComposer({
             maxLength={280}
             onChange={(event) => setBody(event.target.value)}
           />
-          <span className="wc-num" style={{ fontSize: 10.5, color: remaining < 30 ? "var(--down)" : "var(--faint)" }}>
+          <span
+            className="wc-num"
+            style={{
+              flex: "0 0 32px",
+              textAlign: "right",
+              fontSize: 10.5,
+              color: remaining < 30 ? "var(--down)" : "var(--faint)",
+            }}
+          >
             {remaining}
           </span>
         </div>

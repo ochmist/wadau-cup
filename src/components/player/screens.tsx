@@ -3,10 +3,12 @@
 /* Player views — My Picks and Player Detail. */
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CeilingBar, MiniStanding, Mover, fmtKES } from "@/components/ds";
 import { Btn, PageHead, SectionLabel } from "@/components/ui";
 import { TeamLine } from "@/components/player/parts";
+import { fixtureHref, TeamEntityLink } from "@/components/entity-links";
 import { T } from "@/lib/data";
 import { useStandings } from "@/hooks/useStandings";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
@@ -53,6 +55,7 @@ type PointEventTuple = [string, Tier, number];
 type AccountingEvent = {
   id: string;
   label: string;
+  opponentCode: string | null;
   opponentName: string;
   opponentFlag: string;
   detail: string;
@@ -112,6 +115,7 @@ function teamAccountingEvents(team: PlayerTeam, results: ResultWithId[], fixture
       return {
         id: result.id,
         label: `Tier ${team.tier} · ${result.round} · ${outcome}`,
+        opponentCode,
         opponentName: opponent?.n ?? opponentCode,
         opponentFlag: opponent?.f ?? "🏳",
         detail: `${score || "Result entered"} · ${points > 0 ? `earned ${points}` : didDraw ? "no points awarded" : "lost, 0 pts"}`,
@@ -137,6 +141,7 @@ function teamAccountingEvents(team: PlayerTeam, results: ResultWithId[], fixture
       return {
         id: fixture.id,
         label: `Tier ${team.tier} · ${fixture.round} · ${state}`,
+        opponentCode,
         opponentName: opponent?.n ?? opponentName ?? "TBD",
         opponentFlag: opponent?.f ?? "•",
         detail: fixture.status === "live" ? "In progress, points pending" : localFixtureTime(fixture.kickoffAt),
@@ -181,15 +186,17 @@ function PointsPath({
           {rows.map(({ team, events, explained }) => (
             <div key={`${team.tier}-${team.code}`} style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden", background: "var(--surface-2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: events.length ? "1px solid var(--line)" : "none" }}>
-                <span className={"wc-flag " + (team.alive ? "alive" : "out")} style={{ width: 26, height: 26, fontSize: 17 }}>
-                  {team.flag}
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <TeamEntityLink team={team}>
+                  <span className={"wc-flag " + (team.alive ? "alive" : "out")} style={{ width: 26, height: 26, fontSize: 17 }}>
+                    {team.flag}
+                  </span>
+                </TeamEntityLink>
+                <TeamEntityLink team={team} style={{ flex: 1, minWidth: 0, display: "block" }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {team.name}
                   </div>
                   <div className="wc-eyebrow" style={{ marginTop: 2 }}>Tier {team.tier}</div>
-                </div>
+                </TeamEntityLink>
                 <div className="wc-num" style={{ fontSize: 15, fontWeight: 700 }}>
                   {explained}<span className="wc-eyebrow" style={{ marginLeft: 3 }}>pts</span>
                 </div>
@@ -208,11 +215,15 @@ function PointsPath({
                       }}
                     >
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 650 }}>
+                        <Link href={fixtureHref(event.id)} style={{ color: "var(--text)", textDecoration: "none", fontSize: 12.5, fontWeight: 650 }}>
                           {event.label}
-                        </div>
+                        </Link>
                         <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          vs {event.opponentFlag} {event.opponentName} · {event.detail}
+                          vs{" "}
+                          <TeamEntityLink code={event.opponentCode} stopPropagation={false}>
+                            {event.opponentFlag} {event.opponentName}
+                          </TeamEntityLink>{" "}
+                          · {event.detail}
                         </div>
                       </div>
                       <span
@@ -566,7 +577,8 @@ export function PlayerScreen({ name }: { name: string }) {
     teams: myTeams,
     me: true,
   } : null;
-  const players = mySerialized
+  const liveMe = user ? livePlayers.find((player) => player.uid === user.uid || player.me) : null;
+  const players = mySerialized && !liveMe
     ? [mySerialized, ...livePlayers.filter((player) => player.uid !== mySerialized.uid)]
     : livePlayers;
   const scaleMax = liveScaleMax || 100;

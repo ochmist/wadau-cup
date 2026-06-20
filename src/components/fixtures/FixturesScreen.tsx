@@ -6,9 +6,10 @@
    as played: final score + FT, winner emphasised, loser dimmed/grayscale. */
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { LiveMarker } from "@/components/LiveMarker";
 import { PageHead } from "@/components/ui";
+import { TeamEntityLink } from "@/components/entity-links";
 import { T } from "@/lib/data";
 import { fixtureStageLabel, stageLabel } from "@/lib/fixtures";
 import { useAuth } from "@/lib/auth";
@@ -139,12 +140,14 @@ function FixtureSide({
       }}
     >
       <span className={"wc-flag " + (lost ? "out" : "alive")} style={{ width: 28, height: 28, fontSize: 18 }}>
-        {team?.f ?? "•"}
+        <TeamEntityLink code={code}>{team?.f ?? "•"}</TeamEntityLink>
       </span>
       <div style={{ display: "flex", flexDirection: "column", alignItems: align === "right" ? "flex-end" : "flex-start" }}>
-        <span style={{ fontSize: 14.5, fontWeight: state === "win" || mine ? 700 : 600, whiteSpace: "nowrap" }}>
-          {team?.n ?? label ?? "TBD"}
-        </span>
+        <TeamEntityLink code={code}>
+          <span style={{ fontSize: 14.5, fontWeight: state === "win" || mine ? 700 : 600, whiteSpace: "nowrap" }}>
+            {team?.n ?? label ?? "TBD"}
+          </span>
+        </TeamEntityLink>
         {mine && (
           <span
             className="wc-num"
@@ -186,6 +189,7 @@ function ScorerLine({ label, events, align }: { label: string; events: MatchEven
 }
 
 function FixtureCard({ g, mineCodes, href }: { g: Game; mineCodes: string[]; href: string }) {
+  const router = useRouter();
   const aMine = Boolean(g.a && mineCodes.includes(g.a));
   const bMine = Boolean(g.b && mineCodes.includes(g.b));
   const played = isFinal(g);
@@ -197,8 +201,16 @@ function FixtureCard({ g, mineCodes, href }: { g: Game; mineCodes: string[]; hre
   const bScorers = teamScorers(g.events, g.b);
 
   return (
-    <Link
-      href={href}
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(href)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          router.push(href);
+        }
+      }}
       className="wc-card"
       style={{
         width: "100%",
@@ -282,7 +294,7 @@ function FixtureCard({ g, mineCodes, href }: { g: Game; mineCodes: string[]; hre
           {g.warning}
         </div>
       )}
-    </Link>
+    </div>
   );
 }
 

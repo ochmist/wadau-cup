@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ThemeToggle } from "@/components/ds";
 import { SectionLabel } from "@/components/ui";
+import { TeamEntityLink } from "@/components/entity-links";
 import { useAuth } from "@/lib/auth";
 import { T } from "@/lib/data";
 import { fixtureStageLabel } from "@/lib/fixtures";
@@ -253,7 +254,9 @@ function MatchTop({ game }: { game: MatchGame }) {
         </Link>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {teamName(game.a, game.aName)} v {teamName(game.b, game.bName)}
+            <TeamEntityLink code={game.a} stopPropagation={false}>{teamName(game.a, game.aName)}</TeamEntityLink>
+            {" v "}
+            <TeamEntityLink code={game.b} stopPropagation={false}>{teamName(game.b, game.bName)}</TeamEntityLink>
           </div>
           <div className="wc-eyebrow" style={{ marginTop: 1 }}>
             World Cup 2026 · {fixtureStageLabel(game.round, game.group)}
@@ -284,11 +287,11 @@ function TeamCrest({ code, label, formation }: { code: string | null; label?: st
           boxShadow: "0 8px 24px -12px rgba(0,0,0,0.5)",
         }}
       >
-        {teamFlag(code)}
+        <TeamEntityLink code={code} stopPropagation={false}>{teamFlag(code)}</TeamEntityLink>
       </div>
       <div style={{ textAlign: "center", minWidth: 0 }}>
         <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {teamName(code, label)}
+          <TeamEntityLink code={code} stopPropagation={false}>{teamName(code, label)}</TeamEntityLink>
         </div>
         {formation && <div className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 3 }}>{formation}</div>}
       </div>
@@ -422,10 +425,10 @@ function HolderChip({ player, teamCode, currentUid, game }: { player: Serialized
   const detail = projection?.label ?? (pick ? `${pick.pts} pts · +${pick.rem} still possible` : "picked this team");
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 11, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
-      <div className="wc-avatar" style={{ width: 30, height: 30, borderRadius: 9, background: isMe ? "var(--lime)" : "var(--surface-3)", color: isMe ? "var(--on-lime)" : "var(--dim)" }}>
+      <Link href={`/player/${encodeURIComponent(player.name)}`} className="wc-avatar" style={{ width: 30, height: 30, borderRadius: 9, background: isMe ? "var(--lime)" : "var(--surface-3)", color: isMe ? "var(--on-lime)" : "var(--dim)", textDecoration: "none" }}>
         {player.short}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      </Link>
+      <Link href={`/player/${encodeURIComponent(player.name)}`} style={{ flex: 1, minWidth: 0, color: "inherit", textDecoration: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-0.01em" }}>{isMe ? "You" : player.name}</span>
           <span className="wc-num" style={{ fontSize: 10, color: player.rank <= 3 ? "var(--gold)" : "var(--faint)" }}>P{player.rank || "–"}</span>
@@ -433,7 +436,7 @@ function HolderChip({ player, teamCode, currentUid, game }: { player: Serialized
         <div style={{ fontSize: 11.5, color: projection && projection.delta > 0 ? "var(--lime-ink)" : "var(--dim)", fontWeight: 600, marginTop: 1 }}>
           {detail}
         </div>
-      </div>
+      </Link>
     </div>
   );
 }

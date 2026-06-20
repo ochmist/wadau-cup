@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Crest, Mover } from "@/components/ds";
+import { TeamEntityLink } from "@/components/entity-links";
 import { Btn, SectionLabel } from "@/components/ui";
 import { fmtKES } from "@/lib/data";
 import { useAuth } from "@/lib/auth";
@@ -186,9 +187,11 @@ export function ShareScreen() {
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 {alive.map((t) => (
-                  <span key={t.code} className="wc-flag alive" style={{ width: 30, height: 30, fontSize: 20 }}>
-                    {t.flag}
-                  </span>
+                  <TeamEntityLink key={t.code} team={t}>
+                    <span className="wc-flag alive" style={{ width: 30, height: 30, fontSize: 20 }}>
+                      {t.flag}
+                    </span>
+                  </TeamEntityLink>
                 ))}
               </div>
             </div>

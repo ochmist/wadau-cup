@@ -4,6 +4,7 @@
    (TeamLine, ResultRow, CalloutCard). */
 
 import { TierBadge } from "@/components/ui";
+import { TeamEntityLink } from "@/components/entity-links";
 import { T, type PlayerTeam, type ResultMatch, type ResultCallout } from "@/lib/data";
 
 /* team line — used in My Picks + Player Detail */
@@ -28,10 +29,12 @@ export function TeamLine({
       }}
     >
       <TierBadge tier={t.tier} size={34} />
-      <span className={"wc-flag " + (t.alive ? "alive" : "out")} style={{ width: 26, height: 26, fontSize: 17 }}>
-        {t.flag}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <TeamEntityLink team={t}>
+        <span className={"wc-flag " + (t.alive ? "alive" : "out")} style={{ width: 26, height: 26, fontSize: 17 }}>
+          {t.flag}
+        </span>
+      </TeamEntityLink>
+      <TeamEntityLink team={t} style={{ flex: 1, minWidth: 0, display: "block" }}>
         <div style={{ fontSize: 15, fontWeight: 600 }}>{t.name}</div>
         <div className="wc-num" style={{ fontSize: 11, marginTop: 3, color: t.alive ? "var(--dim)" : "var(--faint)" }}>
           {t.alive ? (
@@ -42,7 +45,7 @@ export function TeamLine({
             <span>✕ {statusLine}</span>
           )}
         </div>
-      </div>
+      </TeamEntityLink>
       <div style={{ textAlign: "right" }}>
         <div className="wc-num" style={{ fontSize: 16, fontWeight: 600 }}>
           {t.pts}
@@ -76,10 +79,14 @@ export function ResultRow({ r }: { r: ResultMatch }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {/* side a */}
         <div style={{ display: "flex", alignItems: "center", gap: 9, flex: 1, opacity: draw ? 1 : aWon ? 1 : 0.5 }}>
-          <span className={"wc-flag " + (!draw && !aWon ? "out" : "alive")} style={{ width: 26, height: 26, fontSize: 17 }}>
-            {T[r.a].f}
-          </span>
-          <span style={{ fontSize: 14.5, fontWeight: aWon ? 700 : 600, whiteSpace: "nowrap" }}>{T[r.a].n}</span>
+          <TeamEntityLink code={r.a}>
+            <span className={"wc-flag " + (!draw && !aWon ? "out" : "alive")} style={{ width: 26, height: 26, fontSize: 17 }}>
+              {T[r.a].f}
+            </span>
+          </TeamEntityLink>
+          <TeamEntityLink code={r.a}>
+            <span style={{ fontSize: 14.5, fontWeight: aWon ? 700 : 600, whiteSpace: "nowrap" }}>{T[r.a].n}</span>
+          </TeamEntityLink>
         </div>
         {/* score */}
         <div style={{ textAlign: "center", flex: "none" }}>
@@ -105,10 +112,14 @@ export function ResultRow({ r }: { r: ResultMatch }) {
               flexDirection: "row-reverse",
             }}
           >
-            <span className={"wc-flag " + (!draw && !bWon ? "out" : "alive")} style={{ width: 26, height: 26, fontSize: 17 }}>
-              {T[r.b].f}
-            </span>
-            <span style={{ fontSize: 14.5, fontWeight: bWon ? 700 : 600, whiteSpace: "nowrap" }}>{T[r.b].n}</span>
+            <TeamEntityLink code={r.b}>
+              <span className={"wc-flag " + (!draw && !bWon ? "out" : "alive")} style={{ width: 26, height: 26, fontSize: 17 }}>
+                {T[r.b].f}
+              </span>
+            </TeamEntityLink>
+            <TeamEntityLink code={r.b}>
+              <span style={{ fontSize: 14.5, fontWeight: bWon ? 700 : 600, whiteSpace: "nowrap" }}>{T[r.b].n}</span>
+            </TeamEntityLink>
           </div>
         </div>
       </div>

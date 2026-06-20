@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { TeamEntityLink } from "@/components/entity-links";
 import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { LiveMarker } from "@/components/LiveMarker";
 import { ConfirmDialog, PageHead, SectionLabel } from "@/components/ui";
@@ -513,20 +514,28 @@ function MatchSyncRow({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
-        <span className="wc-flag alive" style={{ width: 28, height: 28, fontSize: 17 }}>
-          {teamFlag(fixture.a || fixture.aName)}
-        </span>
-        <span className="wc-flag alive" style={{ width: 28, height: 28, fontSize: 17 }}>
-          {teamFlag(fixture.b || fixture.bName)}
-        </span>
+        <TeamEntityLink code={fixture.a} stopPropagation={false}>
+          <span className="wc-flag alive" style={{ width: 28, height: 28, fontSize: 17 }}>
+            {teamFlag(fixture.a || fixture.aName)}
+          </span>
+        </TeamEntityLink>
+        <TeamEntityLink code={fixture.b} stopPropagation={false}>
+          <span className="wc-flag alive" style={{ width: 28, height: 28, fontSize: 17 }}>
+            {teamFlag(fixture.b || fixture.bName)}
+          </span>
+        </TeamEntityLink>
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 16, fontWeight: 850 }}>{aLabel}</span>
+          <TeamEntityLink code={fixture.a} stopPropagation={false} style={{ fontSize: 16, fontWeight: 850 }}>
+            {aLabel}
+          </TeamEntityLink>
           <span className="wc-num" style={{ fontSize: 17, fontWeight: 800, color: "var(--text)" }}>
             {scoreText}
           </span>
-          <span style={{ fontSize: 16, fontWeight: 850 }}>{bLabel}</span>
+          <TeamEntityLink code={fixture.b} stopPropagation={false} style={{ fontSize: 16, fontWeight: 850 }}>
+            {bLabel}
+          </TeamEntityLink>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 11, marginTop: 8, flexWrap: "wrap" }}>
           {status.tone === "live" ? (
