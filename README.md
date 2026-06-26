@@ -141,3 +141,28 @@ docs/
 Production deployment uses Firebase App Hosting. See `apphosting.yaml` for the runtime config and `docs/hosting-domain-setup.md` for domain and DNS setup details.
 
 Server-side features (admin API routes, result sync) require `FIREBASE_SERVICE_ACCOUNT_JSON` or Application Default Credentials from the App Hosting runtime. The match data APIs (`FOOTBALL_DATA_API_KEY` and optionally `API_FOOTBALL_API_KEY`) are needed for live scoring.
+
+## Troubleshooting
+
+### Mismatched Project IDs / API Routes Fail with 500
+
+**Symptoms:**
+- The Firebase emulator console output lists warnings like:
+  `⚠ Multiple projectIds are not recommended in single project mode. Requested project ID demo-wadau, but the emulator is configured for wadau-cup.`
+- Server-side API endpoints (such as `/api/fixtures` or `/api/public/pool-summary`) return a `500` status code.
+- No player or pool data is loaded in the application UI despite running `npm run seed`.
+
+**Cause:**
+This occurs when the project ID used by the client and server SDKs for local emulator connections (configured in `.env.local` as `demo-wadau`) does not match the default project configured in `.firebaserc` (`wadau-cup`), which is what the emulator starts with in single-project mode. As a result, the seeding script writes data to the `wadau-cup` project, but the Next.js app queries the `demo-wadau` database, triggering a mismatch error.
+
+**Solution:**
+Align the emulator project IDs in your `.env.local` file with your primary project ID (`wadau-cup`):
+
+```env
+NEXT_PUBLIC_FIREBASE_EMULATOR_PROJECT_ID=wadau-cup
+FIREBASE_EMULATOR_PROJECT_ID=wadau-cup
+```
+
+After updating the file:
+1. Restart your development server (`npm run dev`) so it picks up the environment changes.
+2. Run the seed script again: `npm run seed`.
