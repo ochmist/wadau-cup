@@ -6,19 +6,20 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CeilingBar, MiniStanding, Mover, fmtKES } from "@/components/ds";
-import { Btn, PageHead, SectionLabel } from "@/components/ui";
+import { Btn, PageHead, SectionLabel, TierBadge } from "@/components/ui";
 import { TeamLine } from "@/components/player/parts";
 import { fixtureHref, TeamEntityLink } from "@/components/entity-links";
-import { T } from "@/lib/data";
+import { T, tierMeta } from "@/lib/data";
 import { useStandings } from "@/hooks/useStandings";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
 import { useFixtures } from "@/hooks/useFixtures";
+import { usePool } from "@/hooks/usePool";
 import { useAuth } from "@/lib/auth";
 import { useCountdown } from "@/lib/countdown";
 import { EdgeBanner } from "@/components/edge/EdgeBanner";
 import { displayPhone } from "@/lib/phone";
-import type { FixtureWithId, ResultWithId } from "@/lib/firestore";
+import type { FixtureWithId, LiveStateWithId, ResultWithId } from "@/lib/firestore";
 import type { SerializedPlayer, Tier } from "@/lib/types";
 import type { PlayerTeam } from "@/lib/data";
 
@@ -543,15 +544,822 @@ export function MyPicksScreen() {
 }
 
 // ======================= PLAYER DETAIL ======================= //
+type ProfileTeam = SerializedPlayer["teams"][number];
+type ProfilePlayer = SerializedPlayer & {
+  inMoney: boolean;
+  winnable: number;
+  aliveSorted: ProfileTeam[];
+  outSorted: ProfileTeam[];
+  toMoney: number;
+  gapToLeader: number;
+  canReachFirst: boolean;
+};
+
+type ProfileStage = { key: string; short: string; state: "done" | "current" | "upcoming" };
+
+const PROFILE_STAGES = [
+  ["GRP", "Grp"],
+  ["R32", "R32"],
+  ["R16", "R16"],
+  ["QF", "QF"],
+  ["SF", "SF"],
+  ["F", "Final"],
+] as const;
+
+function profileRoundIndex(round: string) {
+  const value = round.toLowerCase();
+  if (value.includes("final")) return 5;
+  if (value.includes("semi")) return 4;
+  if (value.includes("quarter")) return 3;
+  if (value.includes("16")) return 2;
+  if (value.includes("32")) return 1;
+  return 0;
+}
+
+function profileStageState(round: string): { stages: ProfileStage[]; roundsLeft: number } {
+  const current = profileRoundIndex(round);
+  return {
+    stages: PROFILE_STAGES.map(([key, short], index) => ({
+      key,
+      short,
+      state: index < current ? "done" : index === current ? "current" : "upcoming",
+    })),
+    roundsLeft: Math.max(0, PROFILE_STAGES.length - current - 1),
+  };
+}
+
+function profileFixtureStage(fixture: FixtureWithId) {
+  if (fixture.round.toLowerCase().includes("group") && fixture.group) return `Group ${fixture.group}`;
+  return fixture.round;
+}
+
+function profileTeamNextLabel(team: ProfileTeam, fixtures: FixtureWithId[]) {
+  const now = Date.now();
+  const next = fixtures
+    .filter((fixture) => fixture.a === team.code || fixture.b === team.code)
+    .filter((fixture) => fixture.status !== "finished")
+    .sort((a, b) => fixtureSortMs(a) - fixtureSortMs(b))
+    .find((fixture) => fixture.status === "live" || fixtureSortMs(fixture) >= now);
+
+  if (!next) return "Next · TBD";
+  const opponentCode = next.a === team.code ? next.b : next.a;
+  const opponentName = next.a === team.code ? next.bName : next.aName;
+  const opponent = opponentCode ? T[opponentCode] : null;
+  const stage = profileFixtureStage(next).replace(/^Round of /, "R");
+  return `${stage} · vs ${opponent?.n ?? opponentName ?? "TBD"}`;
+}
+
+function profileTeamOutLabel(team: ProfileTeam, results: ResultWithId[]) {
+  const last = [...results]
+    .filter((result) => result.a === team.code || result.b === team.code)
+    .sort((a, b) => resultSortKey(b) - resultSortKey(a))[0];
+  return `Out · ${last?.round ?? "Group"}`;
+}
+
+function makeProfilePlayer(
+  player: SerializedPlayer,
+  rankedPlayers: SerializedPlayer[],
+  moneyCutoffPoints: number | null,
+): ProfilePlayer {
+  const leaderPoints = rankedPlayers[0]?.points ?? player.points;
+  const aliveSorted = [...player.teams]
+    .filter((team) => team.alive)
+    .sort((a, b) => b.rem - a.rem || b.pts - a.pts || a.name.localeCompare(b.name));
+  const outSorted = [...player.teams]
+    .filter((team) => !team.alive)
+    .sort((a, b) => b.pts - a.pts || a.name.localeCompare(b.name));
+  const inMoney = player.rank > 0 && player.rank <= 3;
+
+  return {
+    ...player,
+    inMoney,
+    winnable: Math.max(0, player.ceiling - player.points),
+    aliveSorted,
+    outSorted,
+    toMoney: player.rank > 3 && typeof moneyCutoffPoints === "number"
+      ? Math.max(1, moneyCutoffPoints - player.points + 1)
+      : 0,
+    gapToLeader: Math.max(0, leaderPoints - player.points),
+    canReachFirst: player.ceiling >= leaderPoints,
+  };
+}
+
+function ProfileHero({ player, big }: { player: ProfilePlayer; big?: boolean }) {
+  const rankLabel = player.rank > 0 ? `Rank #${player.rank}` : "Unranked";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div
+        className="wc-avatar"
+        style={{
+          width: big ? 60 : 54,
+          height: big ? 60 : 54,
+          borderRadius: 17,
+          fontSize: big ? 20 : 18,
+          background: player.me ? "var(--lime)" : "var(--surface-3)",
+          color: player.me ? "var(--on-lime)" : "var(--dim)",
+        }}
+      >
+        {player.short}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: big ? 24 : 20, fontWeight: 800, letterSpacing: "-0.02em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {player.me ? "You" : player.name}
+          </span>
+          {player.me && <span className="wc-tag-you">You</span>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 6 }}>
+          <span className="wc-num" style={{ fontSize: 14, fontWeight: 600, color: player.inMoney ? "var(--gold)" : "var(--dim)" }}>
+            {rankLabel}
+          </span>
+          {player.rank > 0 && <Mover value={player.mover} />}
+          {!player.paid && (
+            <span className="wc-num" style={{ fontSize: 9.5, color: "var(--down)", background: "var(--down-soft)", padding: "1px 6px", borderRadius: 4 }}>
+              UNPAID
+            </span>
+          )}
+        </div>
+      </div>
+      <div style={{ textAlign: "right", flex: "none" }}>
+        <div className="wc-num" style={{ fontSize: big ? 34 : 30, fontWeight: 600, lineHeight: 1 }}>{player.points}</div>
+        <div className="wc-eyebrow" style={{ marginTop: 4 }}>points</div>
+        <div className="wc-num" style={{ fontSize: 13, fontWeight: 600, color: player.inMoney ? "var(--gold)" : "var(--faint)", marginTop: 9, whiteSpace: "nowrap" }}>
+          {player.inMoney ? fmtKES(player.payout) : "Out of money"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileStageTracker({ round }: { round: string }) {
+  const tracker = profileStageState(round);
+  const color = (state: ProfileStage["state"]) => {
+    if (state === "done") return "var(--lime-ink)";
+    if (state === "current") return "var(--gold)";
+    return "var(--faint)";
+  };
+  const barColor = (state: ProfileStage["state"]) => {
+    if (state === "done") return "var(--lime)";
+    if (state === "current") return "var(--gold)";
+    return "var(--track)";
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        {tracker.stages.map((stage) => (
+          <div key={stage.key} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flex: 1 }}>
+            <div style={{ width: "100%", height: 4, borderRadius: 2, background: barColor(stage.state) }} />
+            <span className="wc-num" style={{ fontSize: 9, color: color(stage.state), fontWeight: stage.state === "current" ? 700 : 500, whiteSpace: "nowrap" }}>{stage.short}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 8 }}>
+        <span style={{ color: "var(--lime-ink)", fontWeight: 600 }}>{tracker.roundsLeft} rounds left</span> your alive teams can still score in
+      </div>
+    </div>
+  );
+}
+
+function ProfilePointsPathCard({ player, scaleMax, round }: { player: ProfilePlayer; scaleMax: number; round: string }) {
+  return (
+    <div className="wc-card" style={{ padding: "17px 18px" }}>
+      <SectionLabel>Points path</SectionLabel>
+      <div style={{ fontSize: 14.5, lineHeight: 1.55, marginTop: 10, color: "var(--text)" }}>
+        Banked <b className="wc-num" style={{ color: "var(--lime-ink)" }}>{player.points}</b>.{" "}
+        Up to <b className="wc-num">{player.winnable}</b> more {player.winnable === 0 ? "is" : "are"} still winnable from your{" "}
+        <b>{player.aliveSorted.length} alive {player.aliveSorted.length === 1 ? "team" : "teams"}</b> — a ceiling of <b className="wc-num">{player.ceiling}</b>.
+      </div>
+      <div style={{ marginTop: 15 }}>
+        <CeilingBar points={player.points} ceiling={player.ceiling} scaleMax={scaleMax} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 11 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--lime)" }} />
+          <span className="wc-eyebrow">Banked {player.points}</span>
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--track-2)" }} />
+          <span className="wc-eyebrow">Winnable +{player.winnable}</span>
+        </span>
+      </div>
+      <div style={{ marginTop: 17, paddingTop: 15, borderTop: "1px solid var(--line)" }}>
+        <SectionLabel style={{ marginBottom: 11 }}>Scoring rounds left</SectionLabel>
+        <ProfileStageTracker round={round} />
+      </div>
+    </div>
+  );
+}
+
+function signedPoints(points: number) {
+  return points > 0 ? `+${points}` : `${points}`;
+}
+
+function teamResultPoints(team: ProfileTeam, result: ResultWithId) {
+  const pointRow = (result.pts ?? [])
+    .map(pointEventTuple)
+    .filter((entry): entry is PointEventTuple => Boolean(entry))
+    .find((entry) => entry[0] === team.code && entry[1] === team.tier);
+  return pointRow?.[2] ?? 0;
+}
+
+function resultForTeam(team: ProfileTeam, result: ResultWithId) {
+  const side = result.a === team.code ? "a" : "b";
+  const opponentCode = side === "a" ? result.b : result.a;
+  const gf = side === "a" ? result.sa : result.sb;
+  const ga = side === "a" ? result.sb : result.sa;
+  const didDraw = result.win === "draw";
+  const didWin = result.win === team.code;
+  return {
+    opponentCode,
+    opponentName: T[opponentCode]?.n ?? opponentCode,
+    opponentFlag: T[opponentCode]?.f ?? "🏳",
+    outcome: didWin ? "beat" : didDraw ? "drew" : "lost to",
+    resultMark: didWin ? "W" : didDraw ? "D" : "L",
+    score: gf == null || ga == null ? "Result entered" : `${gf}-${ga}${result.pens ? ` · pens ${result.pens}` : ""}`,
+    points: teamResultPoints(team, result),
+    round: result.round,
+  };
+}
+
+function resultDotStyle(mark: string) {
+  if (mark === "W" || mark === "✓") return { color: "var(--up)", background: "var(--up-soft)" };
+  if (mark === "L") return { color: "var(--down)", background: "var(--down-soft)" };
+  return { color: "var(--flat)", background: "var(--surface-3)" };
+}
+
+function ResultDot({ mark }: { mark: string }) {
+  const tone = resultDotStyle(mark);
+  return (
+    <span
+      style={{
+        width: 19,
+        height: 19,
+        flex: "none",
+        borderRadius: 6,
+        fontFamily: "var(--mono)",
+        fontSize: 9.5,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: tone.color,
+        background: tone.background,
+      }}
+    >
+      {mark}
+    </span>
+  );
+}
+
+function TeamPathDrawer({
+  team,
+  alive,
+  fixtures,
+  liveState,
+  results,
+}: {
+  team: ProfileTeam;
+  alive: boolean;
+  fixtures: FixtureWithId[];
+  liveState: LiveStateWithId[];
+  results: ResultWithId[];
+}) {
+  const perWin = tierMeta[team.tier]?.win ?? 1;
+  const banked = [...results]
+    .filter((result) => result.a === team.code || result.b === team.code)
+    .sort((a, b) => resultSortKey(a) - resultSortKey(b))
+    .map((result) => resultForTeam(team, result));
+  const feedPoints = banked.reduce((sum, result) => sum + result.points, 0);
+  const reconciliation = team.pts - feedPoints;
+  const liveByFixture = new Map(liveState.map((state) => [state.fixtureId, state]));
+  const resultIds = new Set(results.map((result) => result.id));
+  const future = alive ? fixtures
+    .filter((fixture) => fixture.a === team.code || fixture.b === team.code)
+    .filter((fixture) => !resultIds.has(fixture.id))
+    .filter((fixture) => fixture.status !== "finished")
+    .sort((a, b) => {
+      const aLive = liveByFixture.get(a.id)?.status === "live" || liveByFixture.get(a.id)?.status === "paused" || a.status === "live";
+      const bLive = liveByFixture.get(b.id)?.status === "live" || liveByFixture.get(b.id)?.status === "paused" || b.status === "live";
+      if (aLive !== bLive) return aLive ? -1 : 1;
+      return fixtureSortMs(a) - fixtureSortMs(b);
+    })
+    .map((fixture) => {
+      const live = liveByFixture.get(fixture.id);
+      const isLive = fixture.status === "live" || live?.status === "live" || live?.status === "paused";
+      const home = fixture.a === team.code;
+      const opponentCode = home ? fixture.b : fixture.a;
+      const opponentName = home ? fixture.bName : fixture.aName;
+      const teamScore = live ? (home ? live.sa : live.sb) : null;
+      const opponentScore = live ? (home ? live.sb : live.sa) : null;
+      return {
+        id: fixture.id,
+        label: profileFixtureStage(fixture),
+        opponent: `${opponentCode ? T[opponentCode]?.f ?? "" : ""} ${opponentCode ? T[opponentCode]?.n ?? opponentName : opponentName ?? "TBD"}`.trim(),
+        live: isLive,
+        score: teamScore == null || opponentScore == null ? undefined : `${teamScore}-${opponentScore}`,
+        minute: live?.minute ?? null,
+        kickoffAt: fixture.kickoffAt,
+      };
+    }) : [];
+  const drawerRowStyle = {
+    display: "grid",
+    gridTemplateColumns: "19px minmax(0, 1fr) minmax(42px, auto)",
+    alignItems: "center",
+    columnGap: 10,
+    minWidth: 0,
+  } as const;
+  const pointsStyle = {
+    fontSize: 13,
+    fontWeight: 600,
+    flex: "none",
+    minWidth: 0,
+    textAlign: "right",
+    whiteSpace: "normal",
+    lineHeight: 1.18,
+  } as const;
+  const futurePointsStyle = {
+    ...pointsStyle,
+    maxWidth: 76,
+    justifySelf: "end",
+    fontSize: 12,
+    lineHeight: 1.12,
+  } as const;
+
+  return (
+    <div style={{ margin: "2px 0 12px", padding: "13px 12px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)", minWidth: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span className="wc-eyebrow" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>How {team.name} earned</span>
+        <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
+          Tier {team.tier} · +{perWin}/win
+        </span>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {reconciliation !== 0 && (
+          <div style={{ ...drawerRowStyle, padding: "7px 0" }}>
+            <ResultDot mark="✓" />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Group stage &amp; earlier</div>
+              <div className="wc-eyebrow" style={{ marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>reconciles to the standing total</div>
+            </div>
+            <span className="wc-num" style={{ ...pointsStyle, color: reconciliation > 0 ? "var(--lime-ink)" : "var(--down)" }}>
+              {signedPoints(reconciliation)}
+            </span>
+          </div>
+        )}
+        {banked.map((match, index) => (
+          <div key={`${match.round}-${match.opponentCode}-${index}`} style={{ ...drawerRowStyle, padding: "7px 0" }}>
+            <ResultDot mark={match.resultMark} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                <span style={{ marginRight: 5 }}>{match.opponentFlag}</span>{match.outcome} {match.opponentName}
+              </div>
+              <div className="wc-eyebrow" style={{ marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{match.round} · {match.score}</div>
+            </div>
+            <span className="wc-num" style={{ ...pointsStyle, color: match.points > 0 ? "var(--lime-ink)" : "var(--faint)" }}>
+              {signedPoints(match.points)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0 4px", marginTop: 2, borderTop: "1px solid var(--line)" }}>
+        <span className="wc-eyebrow" style={{ color: "var(--lime-ink)" }}>Banked so far</span>
+        <span className="wc-num" style={{ fontSize: 14, fontWeight: 600, color: "var(--lime-ink)" }}>{team.pts} pts</span>
+      </div>
+
+      {alive && future.length > 0 && (
+        <div style={{ marginTop: 10, paddingTop: 11, borderTop: "1px solid var(--line)" }}>
+          <span className="wc-eyebrow" style={{ display: "block", marginBottom: 8 }}>Still to play · each win +{perWin}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {future.map((match, index) => (
+              <div
+                key={match.id}
+                style={{
+                  ...drawerRowStyle,
+                  alignItems: "center",
+                  padding: match.live ? "8px 9px" : "7px 0",
+                  borderRadius: match.live ? 9 : undefined,
+                  background: match.live ? "var(--lime-soft)" : undefined,
+                  border: match.live ? "1px solid var(--lime-line)" : undefined,
+                  gridTemplateColumns: "19px minmax(0, 1fr) minmax(54px, 76px)",
+                }}
+              >
+                {match.live ? (
+                  <span className="wc-live-dot" style={{ width: 7, height: 7 }} />
+                ) : (
+                  <span style={{ width: 19, height: 19, flex: "none", borderRadius: "50%", border: "1.5px dashed var(--line-2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span className="wc-num" style={{ fontSize: 8.5, color: "var(--faint)" }}>{index + 1}</span>
+                  </span>
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {match.live ? "Live" : match.label}
+                    {match.opponent ? <span style={{ color: "var(--dim)", fontWeight: 500 }}> · vs {match.opponent}</span> : null}
+                    {match.score ? <span className="wc-num" style={{ color: "var(--faint)", marginLeft: 5 }}>{match.score}</span> : null}
+                  </div>
+                  <div className="wc-eyebrow" style={{ marginTop: 1, color: match.live ? "var(--lime-ink)" : undefined }}>
+                    {match.live ? `${match.minute ?? "Live"}′` : localFixtureTime(match.kickoffAt)}
+                  </div>
+                </div>
+                <span className="wc-num" style={{ ...futurePointsStyle, color: match.live ? "var(--lime-ink)" : "var(--gold)" }}>
+                  +{perWin}{match.live ? " if it holds" : " if they win"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!alive && (
+        <div style={{ marginTop: 10, paddingTop: 11, borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ color: "var(--down)", fontSize: 12 }}>✕</span>
+          <span style={{ minWidth: 0, fontSize: 12.5, color: "var(--dim)", lineHeight: 1.35 }}>
+            Eliminated at {profileTeamOutLabel(team, results).replace(/^Out · /, "")} — nothing more to earn.
+          </span>
+        </div>
+      )}
+
+      <TeamEntityLink team={team} style={{ marginTop: 12, width: "100%", minWidth: 0, boxSizing: "border-box", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: 8, borderRadius: 9, background: "transparent", border: "1px solid var(--line-2)", color: "var(--dim)", fontSize: 12, fontWeight: 600 }}>
+        View full team
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h9M8 4l4 4-4 4" /></svg>
+      </TeamEntityLink>
+    </div>
+  );
+}
+
+function ProfileLedgerRow({
+  team,
+  alive,
+  last,
+  fixtures,
+  liveState,
+  results,
+}: {
+  team: ProfileTeam;
+  alive: boolean;
+  last: boolean;
+  fixtures: FixtureWithId[];
+  liveState: LiveStateWithId[];
+  results: ResultWithId[];
+}) {
+  const [open, setOpen] = useState(false);
+  const line = alive ? profileTeamNextLabel(team, fixtures) : profileTeamOutLabel(team, results);
+  return (
+    <div style={{ borderBottom: last && !open ? "none" : "1px solid var(--line)" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "11px 2px",
+          opacity: alive ? 1 : 0.7,
+          cursor: "pointer",
+          background: "transparent",
+          border: 0,
+          color: "inherit",
+          font: "inherit",
+          textAlign: "left",
+        }}
+      >
+        <TierBadge tier={team.tier} size={30} />
+        <span className={"wc-flag " + (alive ? "alive" : "out")} style={{ width: 24, height: 24, fontSize: 15, flex: "none" }}>{team.flag}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{team.name}</div>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="var(--faint)"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s", flex: "none" }}
+            >
+              <path d="M4 6l4 4 4-4" />
+            </svg>
+          </div>
+          <div className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {line}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", width: 52, flex: "none" }}>
+          <div className="wc-num" style={{ fontSize: 15, fontWeight: 600 }}>{team.pts}</div>
+          <div className="wc-eyebrow" style={{ fontSize: 8 }}>earned</div>
+        </div>
+        <div style={{ textAlign: "right", width: 58, flex: "none" }}>
+          {alive && team.rem > 0 ? (
+            <>
+              <div className="wc-num" style={{ fontSize: 15, fontWeight: 600, color: "var(--lime-ink)" }}>+{team.rem}</div>
+              <div className="wc-eyebrow" style={{ fontSize: 8 }}>winnable</div>
+            </>
+          ) : (
+            <div className="wc-num" style={{ fontSize: 14, color: "var(--faint)" }}>—</div>
+          )}
+        </div>
+      </button>
+      {open && <TeamPathDrawer team={team} alive={alive} fixtures={fixtures} liveState={liveState} results={results} />}
+    </div>
+  );
+}
+
+function ProfileCeilingLedger({
+  player,
+  fixtures,
+  liveState,
+  results,
+}: {
+  player: ProfilePlayer;
+  fixtures: FixtureWithId[];
+  liveState: LiveStateWithId[];
+  results: ResultWithId[];
+}) {
+  return (
+    <div className="wc-card" style={{ padding: "17px 18px" }}>
+      <SectionLabel>How your ceiling is built</SectionLabel>
+      <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 9, lineHeight: 1.5 }}>
+        Everything you&apos;ve banked, plus the most each <b style={{ color: "var(--text)" }}>alive</b> team can still win.
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--lime)" }} />
+          <SectionLabel style={{ color: "var(--lime-ink)" }}>Alive · {player.aliveSorted.length}</SectionLabel>
+        </div>
+        {player.aliveSorted.map((team, index) => (
+          <ProfileLedgerRow key={team.code} team={team} alive last={index === player.aliveSorted.length - 1} fixtures={fixtures} liveState={liveState} results={results} />
+        ))}
+      </div>
+
+      {player.outSorted.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <SectionLabel style={{ marginBottom: 4 }}>✕ Eliminated · {player.outSorted.length} · banked, nothing left</SectionLabel>
+          {player.outSorted.map((team, index) => (
+            <ProfileLedgerRow key={team.code} team={team} alive={false} last={index === player.outSorted.length - 1} fixtures={fixtures} liveState={liveState} results={results} />
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        {([
+          ["Banked", player.points, "var(--lime-ink)"],
+          ["Winnable", `+${player.winnable}`, "var(--text)"],
+          ["Ceiling", player.ceiling, "var(--text)"],
+        ] as Array<[string, string | number, string]>).map(([label, value, color]) => (
+          <div key={label} style={{ flex: 1, padding: "11px 13px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
+            <div className="wc-num" style={{ fontSize: 20, fontWeight: 600, color, lineHeight: 1 }}>{value}</div>
+            <div className="wc-eyebrow" style={{ marginTop: 6, fontSize: 9 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfileWhereYouStand({
+  player,
+  rankedPlayers,
+}: {
+  player: ProfilePlayer;
+  rankedPlayers: ProfilePlayer[];
+}) {
+  const ahead = rankedPlayers.find((entry) => entry.rank === player.rank - 1);
+  const behind = rankedPlayers.find((entry) => entry.rank === player.rank + 1);
+  const subject = player.me ? "you" : player.name.split(" ")[0];
+  const Line = ({ label, val, tone }: { label: string; val: string; tone?: string }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+      <span style={{ fontSize: 13, color: "var(--dim)" }}>{label}</span>
+      <span className="wc-num" style={{ fontSize: 13.5, fontWeight: 600, color: tone || "var(--text)", textAlign: "right" }}>{val}</span>
+    </div>
+  );
+
+  return (
+    <div className="wc-card" style={{ padding: "17px 18px" }}>
+      <SectionLabel>Where {subject} stand{player.me ? "" : "s"}</SectionLabel>
+      <div style={{ marginTop: 8 }}>
+        {!player.inMoney && player.toMoney > 0 && <Line label="To the money (3rd)" val={`${player.toMoney} pts back`} tone="var(--down)" />}
+        {player.rank > 1 && <Line label="To the leader" val={`${player.gapToLeader} pts back`} />}
+        {ahead && <Line label={`Catch ${ahead.me ? "you" : ahead.name} (#${ahead.rank})`} val={`+${Math.max(0, ahead.points - player.points)} to pass`} tone="var(--lime-ink)" />}
+        {behind && <Line label={`${behind.me ? "You" : behind.name} (#${behind.rank}) chasing`} val={`${Math.max(0, player.points - behind.points)} pts behind`} />}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, paddingTop: 10 }}>
+          <span style={{ fontSize: 13, color: "var(--dim)" }}>Can still reach 1st?</span>
+          <span className="wc-num" style={{ fontSize: 13.5, fontWeight: 600, color: player.canReachFirst ? "var(--lime-ink)" : "var(--faint)", textAlign: "right" }}>
+            {player.canReachFirst ? "Yes — ceiling clears it" : "No longer possible"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function cmpSummarize(teams: ProfileTeam[]) {
+  return teams.reduce(
+    (summary, team) => ({
+      earned: summary.earned + team.pts,
+      winnable: summary.winnable + (team.alive ? Math.max(0, team.rem - team.pts) : 0),
+      count: summary.count + 1,
+    }),
+    { earned: 0, winnable: 0, count: 0 },
+  );
+}
+
+function CmpTeamRow({ t, accent, last }: { t: ProfileTeam; accent: string; last: boolean }) {
+  const winnable = t.alive ? Math.max(0, t.rem - t.pts) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: last ? "none" : "1px solid var(--line)", opacity: t.alive ? 1 : 0.6 }}>
+      <span className={"wc-flag " + (t.alive ? "alive" : "out")} style={{ width: 22, height: 22, fontSize: 14, flex: "none" }}>{t.flag}</span>
+      <TierBadge tier={t.tier} size={22} />
+      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+      <span className="wc-num" style={{ fontSize: 13, fontWeight: 600, width: 26, textAlign: "right", flex: "none" }}>{t.pts}</span>
+      <span className="wc-num" style={{ fontSize: 12, fontWeight: 600, color: winnable > 0 ? accent : "var(--faint)", width: 34, textAlign: "right", flex: "none" }}>
+        {winnable > 0 ? `+${winnable}` : "—"}
+      </span>
+    </div>
+  );
+}
+
+function ProfileCompareCard({ me, them }: { me: ProfilePlayer; them: ProfilePlayer }) {
+  const theirCodes = new Set(them.teams.map((team) => team.code));
+  const mineCodes = new Set(me.teams.map((team) => team.code));
+  const shared = me.teams.filter((team) => theirCodes.has(team.code));
+  const yourEdge = me.teams
+    .filter((team) => !theirCodes.has(team.code))
+    .sort((a, b) => (b.pts + b.rem) - (a.pts + a.rem));
+  const theirEdge = them.teams
+    .filter((team) => !mineCodes.has(team.code))
+    .sort((a, b) => (b.pts + b.rem) - (a.pts + a.rem));
+  const yourSummary = cmpSummarize(yourEdge);
+  const theirSummary = cmpSummarize(theirEdge);
+  const gap = me.points - them.points;
+  const netSwing = yourSummary.winnable - theirSummary.winnable;
+  const youLead = gap > 0;
+  const level = gap === 0;
+  const [open, setOpen] = useState(false);
+  const youAccent = "var(--lime-ink)";
+  const themAccent = "var(--violet)";
+  const themName = them.name.split(" ")[0];
+
+  const Side = ({ player, accent, align }: { player: ProfilePlayer; accent: string; align: "l" | "r" }) => (
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: align === "r" ? "flex-end" : "flex-start", gap: 7 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: align === "r" ? "row-reverse" : "row", minWidth: 0 }}>
+        <div
+          className="wc-avatar"
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 9,
+            fontSize: 11,
+            background: player.me ? "var(--lime)" : "var(--violet-soft)",
+            color: player.me ? "var(--on-lime)" : accent,
+          }}
+        >
+          {player.short}
+        </div>
+        <span style={{ minWidth: 0, fontSize: 14, fontWeight: 700, letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {player.me ? "You" : player.name.split(" ")[0]}
+        </span>
+      </div>
+      <span className="wc-num" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1, color: accent }}>{player.points}</span>
+      <span className="wc-eyebrow" style={{ fontSize: 8.5 }}>#{player.rank} · {player.points} pts</span>
+    </div>
+  );
+
+  const EdgeBlock = ({
+    label,
+    sub,
+    teams,
+    accent,
+    soft,
+  }: {
+    label: string;
+    sub: string;
+    teams: ProfileTeam[];
+    accent: string;
+    soft: string;
+  }) => (
+    <div style={{ padding: "12px 14px", borderRadius: 12, background: soft, border: `1px solid ${accent}33` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+        <span className="wc-eyebrow" style={{ color: accent }}>{label}</span>
+        <span className="wc-num" style={{ fontSize: 10, color: "var(--faint)", textAlign: "right" }}>{sub}</span>
+      </div>
+      {teams.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "4px 0" }}>None — no differential here.</div>
+      ) : (
+        teams.map((team, index) => <CmpTeamRow key={team.code} t={team} accent={accent} last={index === teams.length - 1} />)
+      )}
+    </div>
+  );
+
+  return (
+    <div className="wc-card" style={{ padding: "17px 18px" }}>
+      <SectionLabel>Head to head</SectionLabel>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 13 }}>
+        <Side player={me} accent={youAccent} align="l" />
+        <div style={{ flex: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+          <span className="wc-eyebrow" style={{ fontSize: 8 }}>gap</span>
+          <span className="wc-num" style={{ fontSize: 18, fontWeight: 600, color: level ? "var(--faint)" : youLead ? youAccent : themAccent }}>
+            {level ? "—" : Math.abs(gap)}
+          </span>
+        </div>
+        <Side player={them} accent={themAccent} align="r" />
+      </div>
+
+      <div style={{ fontSize: 13, color: "var(--dim)", marginTop: 14, lineHeight: 1.5, textAlign: "center" }}>
+        {level ? (
+          <>Dead level with <b style={{ color: "var(--text)" }}>{themName}</b>.</>
+        ) : youLead ? (
+          <>You lead <b style={{ color: "var(--text)" }}>{themName}</b> by <b className="wc-num" style={{ color: youAccent }}>{gap}</b>.</>
+        ) : (
+          <><b style={{ color: "var(--text)" }}>{themName}</b> leads you by <b className="wc-num" style={{ color: themAccent }}>{-gap}</b>.</>
+        )}
+        {" "}Shared picks cancel.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 14, padding: "10px 12px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
+        <span className="wc-eyebrow" style={{ color: "var(--dim)" }}>Differential left</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span className="wc-num" style={{ color: youAccent, fontSize: 13, fontWeight: 600 }}>+{yourSummary.winnable}</span>
+          <span className="wc-num" style={{ color: themAccent, fontSize: 13, fontWeight: 600 }}>+{theirSummary.winnable}</span>
+          <span
+            className="wc-num"
+            style={{
+              padding: "2px 7px",
+              borderRadius: 999,
+              background: "var(--surface-3)",
+              color: netSwing > 0 ? youAccent : netSwing < 0 ? themAccent : "var(--faint)",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {netSwing === 0 ? "even" : netSwing > 0 ? `you +${netSwing}` : `them +${-netSwing}`}
+          </span>
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        style={{ marginTop: 11, width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7, padding: 9, borderRadius: 10, background: "transparent", border: "1px solid var(--line-2)", color: "var(--dim)", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}
+      >
+        {open ? "Hide the differential" : "Show the differential"}
+        {!open && <span style={{ color: "var(--faint)" }}>·</span>}
+        {!open && <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)" }}>{yourSummary.count}+{theirSummary.count} teams</span>}
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}><path d="M4 6l4 4 4-4" /></svg>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <EdgeBlock label="Your edge" sub={`only you · ${yourSummary.count} · +${yourSummary.winnable} left`} teams={yourEdge} accent={youAccent} soft="var(--lime-soft)" />
+            <EdgeBlock label={`${themName}'s edge`} sub={`only them · ${theirSummary.count} · +${theirSummary.winnable} left`} teams={theirEdge} accent={themAccent} soft="var(--violet-soft)" />
+          </div>
+
+          {shared.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, padding: "10px 13px", borderRadius: 11, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
+              <span className="wc-eyebrow" style={{ flex: "none" }}>Shared · cancel</span>
+              <div style={{ display: "flex", gap: 4, flex: 1, minWidth: 0, flexWrap: "wrap" }}>
+                {shared.map((team) => <span key={team.code} className={"wc-flag " + (team.alive ? "alive" : "out")} style={{ width: 20, height: 20, fontSize: 13 }}>{team.flag}</span>)}
+              </div>
+              <span className="wc-num" style={{ fontSize: 11, color: "var(--faint)", flex: "none" }}>{shared.length}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileTieBreaker({ player, canViewPicks }: { player: ProfilePlayer; canViewPicks: boolean }) {
+  return (
+    <div className="wc-card" style={{ padding: "15px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div>
+        <SectionLabel>Tie-breaker</SectionLabel>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginTop: 4 }}>Goals in the Final</div>
+      </div>
+      <span className="wc-num" style={{ fontSize: 24, fontWeight: 600, color: "var(--lime-ink)" }}>{canViewPicks ? player.finalGoals ?? "—" : "—"}</span>
+    </div>
+  );
+}
+
 export function PlayerScreen({ name }: { name: string }) {
   const router = useRouter();
   const { user, approvalStatus } = useAuth();
+  const { round: poolRound } = usePool();
   // Use live standings so player data is real. useStandings only returns mock data
   // when Firebase is not configured at all.
-  const { players: livePlayers, scaleMax: liveScaleMax, loading } = useStandings(user?.uid);
+  const { players: livePlayers, scaleMax: liveScaleMax, round, loading } = useStandings(user?.uid);
   const { player: myPlayer, loading: myPlayerLoading } = useMyData();
-  const { results, loading: resultsLoading } = useResults();
-  const { fixtures, loading: fixturesLoading } = useFixtures();
+  const { results } = useResults();
+  const { fixtures, liveState } = useFixtures();
   const countdown = useCountdown();
 
   const myTeams = enrichPlayerTeams(myPlayer).map((t) => ({ ...t, alive: t.alive }));
@@ -582,7 +1390,6 @@ export function PlayerScreen({ name }: { name: string }) {
     ? [mySerialized, ...livePlayers.filter((player) => player.uid !== mySerialized.uid)]
     : livePlayers;
   const scaleMax = liveScaleMax || 100;
-  const me = players.find((p) => p.me);
 
   if (loading || (user && myPlayerLoading)) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 64, color: "var(--faint)", fontSize: 14 }}>Loading…</div>;
@@ -611,52 +1418,13 @@ export function PlayerScreen({ name }: { name: string }) {
 
   const isMe = !!p.me;
   const canViewPicks = isMe || (countdown.ready && countdown.isLocked);
-  const alive = canViewPicks ? p.teams.filter((t) => t.alive).sort(sortByPts) : [];
-  const out = canViewPicks ? p.teams.filter((t) => !t.alive).sort(sortByPts) : [];
-  const gap = me ? me.points - p.points : 0;
-  const ranked = p.rank > 0;
-  const moneyCutoffPoints = players.filter((x) => x.rank > 0).sort((a, b) => a.rank - b.rank)[2]?.points ?? null;
-  const moneyLabel = (() => {
-    if (p.payout) return "Proj. " + fmtKES(p.payout);
-    if (!ranked) return "Unranked";
-    if (typeof moneyCutoffPoints !== "number") return "1 pt from money";
-    const moneyGap = Math.max(1, moneyCutoffPoints - p.points + 1);
-    return `${moneyGap} ${moneyGap === 1 ? "pt" : "pts"} from money`;
-  })();
-
-  const Header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-      <div className="wc-avatar" style={{ width: 54, height: 54, borderRadius: 16, fontSize: 18 }}>{p.short}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em" }}>{p.name}</span>
-          {isMe && <span className="wc-tag-you">You</span>}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5 }}>
-          <span className="wc-num" style={{ fontSize: 13, color: ranked && p.rank <= 3 ? "var(--gold)" : "var(--dim)", fontWeight: 600 }}>
-            {ranked ? `#${p.rank}` : "Unranked"}
-          </span>
-          {ranked && <Mover value={p.mover} />}
-        </div>
-      </div>
-      <div style={{ textAlign: "right" }}>
-        <div className="wc-num" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1 }}>{p.points}</div>
-        <div className="wc-eyebrow" style={{ marginTop: 4 }}>points</div>
-      </div>
-    </div>
-  );
-
-  const Ceiling = (
-    <div className="wc-card" style={{ padding: "15px 16px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <SectionLabel>Points vs ceiling</SectionLabel>
-        <span className="wc-num" style={{ fontSize: 13, fontWeight: 600, color: p.payout ? "var(--gold)" : "var(--dim)" }}>
-          {moneyLabel}
-        </span>
-      </div>
-      <div style={{ marginTop: 12 }}><CeilingBar points={p.points} ceiling={p.ceiling} scaleMax={scaleMax} /></div>
-    </div>
-  );
+  const rankedBase = players.filter((entry) => entry.rank > 0).sort((a, b) => a.rank - b.rank);
+  const moneyCutoffPoints = rankedBase[2]?.points ?? null;
+  const profilePlayers = rankedBase.map((entry) => makeProfilePlayer(entry, rankedBase, moneyCutoffPoints));
+  const profile = makeProfilePlayer(p, rankedBase, moneyCutoffPoints);
+  const compareBase = players.find((entry) => entry.me);
+  const compareMe = compareBase ? makeProfilePlayer(compareBase, rankedBase, moneyCutoffPoints) : null;
+  const profileRound = round === "—" ? poolRound : round;
 
   const PrivatePicks = (
     <div className="wc-card" style={{ padding: "22px 20px", textAlign: "center" }}>
@@ -673,21 +1441,6 @@ export function PlayerScreen({ name }: { name: string }) {
     </div>
   );
 
-  const Gap = !isMe && me ? (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
-      <span style={{ fontSize: 13, color: "var(--dim)" }}>
-        {gap > 0 ? `${gap} pts ahead of you` : gap < 0 ? `${-gap} pts behind you` : "Level with you"}
-      </span>
-    </div>
-  ) : null;
-
-  const Tie = (
-    <div className="wc-card" style={{ padding: "15px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <span style={{ fontSize: 13.5, color: "var(--dim)" }}>Final-goals tie-breaker</span>
-      <span className="wc-num" style={{ fontSize: 18, fontWeight: 600 }}>{canViewPicks ? p.finalGoals ?? "—" : "—"}</span>
-    </div>
-  );
-
   const BackLink = (
     <button
       onClick={() => router.push("/")}
@@ -701,55 +1454,47 @@ export function PlayerScreen({ name }: { name: string }) {
   return (
     <>
       {/* desktop */}
-      <div className="wc-desktop-only" style={{ maxWidth: 900, margin: "0 auto", padding: "26px 28px 64px" }}>
+      <div className="wc-desktop-only" style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 28px 56px" }}>
         {BackLink}
-        {Header}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 18, marginTop: 18, alignItems: "start" }}>
-          {canViewPicks ? (
-            <div>
-              <SectionLabel style={{ marginBottom: 8, color: "var(--lime-ink)" }}>● Still alive · {alive.length}</SectionLabel>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {alive.map((t) => (<div key={t.code} className="wc-card" style={{ padding: "4px 14px" }}><TeamLine t={t} showRem last /></div>))}
-              </div>
-              <SectionLabel style={{ margin: "22px 0 8px" }}>✕ Eliminated · {out.length}</SectionLabel>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {out.map((t) => (<div key={t.code} className="wc-card" style={{ padding: "4px 14px" }}><TeamLine t={t} last /></div>))}
-              </div>
-            </div>
-          ) : PrivatePicks}
-          <div>
-            <div className="wc-eyebrow" aria-hidden style={{ visibility: "hidden", marginBottom: 8 }}>·</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {canViewPicks && Ceiling}{Gap}{canViewPicks && Tie}
-              {canViewPicks && <PointsPath player={p} results={results} fixtures={fixtures} loading={resultsLoading || fixturesLoading} />}
-            </div>
-          </div>
+        <div className="wc-card" style={{ padding: "22px 24px" }}>
+          <ProfileHero player={profile} big />
         </div>
+        {canViewPicks && !profile.me && compareMe && (
+          <div style={{ marginTop: 20 }}>
+            <ProfileCompareCard me={compareMe} them={profile} />
+          </div>
+        )}
+        {canViewPicks ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 20, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <ProfilePointsPathCard player={profile} scaleMax={scaleMax} round={profileRound} />
+              <ProfileWhereYouStand player={profile} rankedPlayers={profilePlayers} />
+              <ProfileTieBreaker player={profile} canViewPicks={canViewPicks} />
+            </div>
+              <ProfileCeilingLedger player={profile} fixtures={fixtures} liveState={liveState} results={results} />
+          </div>
+        ) : (
+          <div style={{ marginTop: 20 }}>{PrivatePicks}</div>
+        )}
       </div>
 
       {/* mobile */}
-      <div className="wc-mobile-only" style={{ padding: "16px 18px 22px" }}>
+      <div className="wc-mobile-only" style={{ padding: "16px 16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
         {BackLink}
-        {Header}
-        {canViewPicks && <div style={{ marginTop: 16 }}>{Ceiling}</div>}
-        {Gap && <div style={{ marginTop: 14 }}>{Gap}</div>}
         {canViewPicks ? (
           <>
-            <SectionLabel style={{ marginTop: 22, marginBottom: 6, color: "var(--lime-ink)" }}>● Still alive · {alive.length}</SectionLabel>
-            <div className="wc-card" style={{ padding: "2px 14px" }}>
-              {alive.map((t, i) => <TeamLine key={t.code} t={t} showRem last={i === alive.length - 1} />)}
-            </div>
-            <SectionLabel style={{ marginTop: 20, marginBottom: 6 }}>✕ Eliminated · {out.length}</SectionLabel>
-            <div className="wc-card" style={{ padding: "2px 14px" }}>
-              {out.map((t, i) => <TeamLine key={t.code} t={t} last={i === out.length - 1} />)}
-            </div>
-            <div style={{ marginTop: 18 }}>{Tie}</div>
-            <div style={{ marginTop: 18 }}>
-              <PointsPath player={p} results={results} fixtures={fixtures} loading={resultsLoading || fixturesLoading} />
-            </div>
+            <ProfileHero player={profile} />
+            {!profile.me && compareMe && <ProfileCompareCard me={compareMe} them={profile} />}
+            <ProfilePointsPathCard player={profile} scaleMax={scaleMax} round={profileRound} />
+            <ProfileCeilingLedger player={profile} fixtures={fixtures} liveState={liveState} results={results} />
+            <ProfileWhereYouStand player={profile} rankedPlayers={profilePlayers} />
+            <ProfileTieBreaker player={profile} canViewPicks={canViewPicks} />
           </>
         ) : (
-          <div style={{ marginTop: 18 }}>{PrivatePicks}</div>
+          <>
+            <ProfileHero player={profile} />
+            {PrivatePicks}
+          </>
         )}
       </div>
     </>

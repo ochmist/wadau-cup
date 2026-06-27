@@ -10,11 +10,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CeilingBar,
-  DESKTOP_GRID,
-  DesktopRow,
+  FlagRow,
   fmtK,
   fmtKES,
-  MobileRow,
   MoneyLine,
   Mover,
 } from "@/components/ds";
@@ -27,6 +25,7 @@ import { usePool } from "@/hooks/usePool";
 import { useCountdown } from "@/lib/countdown";
 import { PAYMENT_RECIPIENTS, PAYMENT_WHATSAPP } from "@/lib/payment";
 import { TeamEntityLink } from "@/components/entity-links";
+import { SectionLabel } from "@/components/ui";
 
 function playerKey(p: { uid?: string; name: string }, scope: string, index: number) {
   return `${scope}-${p.uid ?? p.name}-${index}`;
@@ -152,157 +151,386 @@ function PaymentInfoCard({ buyin }: { buyin: number }) {
   );
 }
 
-function MyStandingJump({
-  player,
-  moneyCutoffPoints,
-  onJump,
-}: {
-  player: SerializedPlayer;
-  moneyCutoffPoints?: number | null;
-  onJump: () => void;
-}) {
-  const ranked = player.rank > 0;
-  const moneyGap = ranked && player.rank > 3 && typeof moneyCutoffPoints === "number"
+type RankStage = { key: string; short: string; state: "done" | "current" | "future" };
+
+type RankPlayer = SerializedPlayer & {
+  inMoney: boolean;
+  winnable: number;
+  toMoney: number;
+  canReachMoney: boolean;
+  ceilingParts: { code: string; flag: string; name: string; tier: SerializedPlayer["teams"][number]["tier"]; winnable: number }[];
+};
+
+const RANK_STAGES = [
+  ["group", "Grp"],
+  ["round-32", "R32"],
+  ["round-16", "R16"],
+  ["quarter", "QF"],
+  ["semi", "SF"],
+  ["final", "Final"],
+] as const;
+
+function roundStageIndex(round: string) {
+  const value = round.toLowerCase();
+  if (value.includes("final")) return 5;
+  if (value.includes("semi")) return 4;
+  if (value.includes("quarter")) return 3;
+  if (value.includes("16")) return 2;
+  if (value.includes("32")) return 1;
+  return 0;
+}
+
+function rankStages(round: string): { stages: RankStage[]; roundsLeft: number } {
+  const current = roundStageIndex(round);
+  return {
+    stages: RANK_STAGES.map(([key, short], index) => ({
+      key,
+      short,
+      state: index < current ? "done" : index === current ? "current" : "future",
+    })),
+    roundsLeft: Math.max(0, RANK_STAGES.length - current - 1),
+  };
+}
+
+function rankPlayer(player: SerializedPlayer, moneyCutoffPoints: number | null): RankPlayer {
+  const inMoney = player.rank > 0 && player.rank <= 3;
+  const toMoney = player.rank > 0 && player.rank > 3 && typeof moneyCutoffPoints === "number"
     ? Math.max(1, moneyCutoffPoints - player.points + 1)
-    : null;
-  const context = !ranked
-    ? "unranked"
-    : player.rank <= 3
-      ? "in the money"
-      : moneyGap
-        ? `${moneyGap} from money`
-        : "outside money";
+    : 0;
+  return {
+    ...player,
+    inMoney,
+    winnable: Math.max(0, player.ceiling - player.points),
+    toMoney,
+    canReachMoney: typeof moneyCutoffPoints === "number" ? player.ceiling >= moneyCutoffPoints : true,
+    ceilingParts: player.teams
+      .filter((team) => team.alive && team.rem > 0)
+      .map((team) => ({ code: team.code, flag: team.flag, name: team.name, tier: team.tier, winnable: team.rem })),
+  };
+}
+
+function StageTracker({ round, compact }: { round: string; compact?: boolean }) {
+  const tracker = rankStages(round);
+  const color = (state: RankStage["state"]) => {
+    if (state === "done") return "var(--lime-ink)";
+    if (state === "current") return "var(--gold)";
+    return "var(--faint)";
+  };
+  const barColor = (state: RankStage["state"]) => {
+    if (state === "done") return "var(--lime)";
+    if (state === "current") return "var(--gold)";
+    return "var(--track)";
+  };
   return (
-    <button
-      type="button"
-      onClick={onJump}
-      className="wc-card"
-      style={{
-        width: "100%",
-        borderColor: "var(--lime-line)",
-        background: "var(--surface)",
-        color: "var(--text)",
-        padding: "10px 14px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        cursor: "pointer",
-        fontFamily: "inherit",
-        textAlign: "left",
-      }}
-    >
-      <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-        <span className="wc-num" style={{ fontSize: 18, fontWeight: 600, color: player.rank > 0 && player.rank <= 3 ? "var(--gold)" : "var(--text)" }}>
-          {ranked ? player.rank : "—"}
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        {tracker.stages.map((stage) => (
+          <div key={stage.key} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, flex: 1 }}>
+            <div style={{ width: "100%", height: 4, borderRadius: 2, background: barColor(stage.state) }} />
+            {!compact && <span className="wc-num" style={{ fontSize: 9, color: color(stage.state), fontWeight: stage.state === "current" ? 700 : 500, whiteSpace: "nowrap" }}>{stage.short}</span>}
+          </div>
+        ))}
+      </div>
+      {!compact && (
+        <div style={{ fontSize: 11.5, color: "var(--dim)", marginTop: 8 }}>
+          <span style={{ color: "var(--lime-ink)", fontWeight: 600 }}>{tracker.roundsLeft} rounds left</span> your alive teams can still score in
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CeilingExplain({ player, scaleMax }: { player: RankPlayer; scaleMax: number }) {
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "var(--dim)", lineHeight: 1.5 }}>
+        <span className="wc-num" style={{ color: "var(--lime-ink)", fontWeight: 700 }}>{player.points}</span> banked
+        <span style={{ margin: "0 6px", color: "var(--faint)" }}>+</span>
+        <span className="wc-num" style={{ color: "var(--text)", fontWeight: 700 }}>{player.winnable}</span> still winnable
+        <span style={{ margin: "0 6px", color: "var(--faint)" }}>=</span>
+        <span className="wc-num" style={{ color: "var(--text)", fontWeight: 700 }}>{player.ceiling}</span> ceiling
+      </div>
+      <div style={{ marginTop: 11 }}>
+        <CeilingBar points={player.points} ceiling={player.ceiling} scaleMax={scaleMax} showCaption={false} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 9 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--lime)" }} />
+          <span className="wc-eyebrow">Banked</span>
         </span>
-        <span className="wc-avatar" style={{ width: 28, height: 28, borderRadius: 8, background: "var(--lime)", color: "var(--on-lime)" }}>{player.short}</span>
-        <span style={{ minWidth: 0 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <span style={{ display: "block", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              You
-            </span>
-            <Mover value={player.mover} showZero={false} />
-          </span>
-          <span className="wc-num" style={{ display: "block", marginTop: 1, fontSize: 10.5, color: "var(--dim)" }}>
-            {player.points} pts · {context}
-          </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--track-2)" }} />
+          <span className="wc-eyebrow">Still winnable</span>
         </span>
-      </span>
-      <span className="wc-rk-jump" style={{ flex: "none" }}>
-        Jump to me
-        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 11V3M3.5 6.5L7 3l3.5 3.5" /></svg>
-      </span>
-    </button>
+      </div>
+    </div>
+  );
+}
+
+function MoneyContext({ player }: { player: RankPlayer }) {
+  if (player.inMoney) {
+    return <div className="wc-num wc-gold-fill" style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>{fmtKES(player.payout)}</div>;
+  }
+  if (player.toMoney > 0 && player.toMoney <= 2) {
+    return <div className="wc-num" style={{ fontSize: 11.5, color: "var(--down)", fontWeight: 600, whiteSpace: "nowrap" }}>{player.toMoney} {player.toMoney === 1 ? "pt" : "pts"} from money</div>;
+  }
+  return (
+    <div className="wc-num" style={{ fontSize: 11.5, color: player.canReachMoney ? "var(--dim)" : "var(--faint)", whiteSpace: "nowrap" }}>
+      {player.toMoney > 0 ? `${player.toMoney} pts back` : player.canReachMoney ? "outside money" : "out of contention"}
+    </div>
+  );
+}
+
+function ContribChips({ player, max }: { player: RankPlayer; max?: number }) {
+  const parts = player.ceilingParts.slice(0, max ?? 6);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {parts.length ? parts.map((part) => (
+        <TeamEntityLink key={part.code} team={{ code: part.code, name: part.name, flag: part.flag }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 9px 4px 5px", borderRadius: 999, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
+            <span className="wc-flag alive" style={{ width: 18, height: 18, fontSize: 12 }}>{part.flag}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 600 }}>{part.name}</span>
+            <span className="wc-num" style={{ fontSize: 10.5, color: "var(--lime-ink)", fontWeight: 600 }}>+{part.winnable}</span>
+          </span>
+        </TeamEntityLink>
+      )) : <div style={{ fontSize: 12.5, color: "var(--faint)" }}>No teams can add more points.</div>}
+    </div>
   );
 }
 
 function RowDrawer({
   player,
   scaleMax,
-  moneyCutoffPoints,
+  round,
   onProfile,
 }: {
-  player: SerializedPlayer;
+  player: RankPlayer;
   scaleMax: number;
-  moneyCutoffPoints: number | null;
+  round: string;
   onProfile: () => void;
 }) {
-  const headroom = Math.max(0, player.ceiling - player.points);
-  const aliveTeams = player.teams.filter((team) => team.alive);
-  const moneyGap = player.rank > 0 && player.rank > 3 && typeof moneyCutoffPoints === "number"
-    ? Math.max(1, moneyCutoffPoints - player.points + 1)
-    : null;
   return (
-    <div style={{ borderBottom: "1px solid var(--line)", background: "var(--surface-2)", padding: "14px 18px 16px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 14, alignItems: "start" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 9 }}>
-            {[
-              ["Now", player.points],
-              ["Still possible", headroom],
-              ["Ceiling", player.ceiling],
-            ].map(([label, value]) => (
-              <div key={label} className="wc-card" style={{ padding: "10px 11px", background: "var(--surface)" }}>
-                <div className="wc-eyebrow" style={{ fontSize: 9 }}>{label}</div>
-                <div className="wc-num" style={{ fontSize: 20, fontWeight: 800, color: label === "Still possible" ? "var(--lime-ink)" : "var(--text)", marginTop: 3 }}>
-                  {value}
-                </div>
-              </div>
-            ))}
+    <div style={{ padding: "2px 2px 4px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
+        <div>
+          <SectionLabel style={{ marginBottom: 10 }}>Points vs ceiling</SectionLabel>
+          <CeilingExplain player={player} scaleMax={scaleMax} />
+        </div>
+        <div>
+          <SectionLabel style={{ marginBottom: 10 }}>Still winnable from</SectionLabel>
+          <ContribChips player={player} />
+        </div>
+        <div>
+          <SectionLabel style={{ marginBottom: 10 }}>Scoring rounds left</SectionLabel>
+          <StageTracker round={round} />
+        </div>
+      </div>
+      <button
+        className="wc-btn wc-btn-ghost"
+        onClick={(event) => {
+          event.stopPropagation();
+          onProfile();
+        }}
+        style={{ marginTop: 16, padding: "10px 14px", fontSize: 13, width: "100%" }}
+        type="button"
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+          View full profile
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h9M8 4l4 4-4 4" /></svg>
+        </span>
+      </button>
+    </div>
+  );
+}
+
+function LeanRowMobile({
+  player,
+  scaleMax,
+  round,
+  last,
+  open,
+  rowId,
+  onRowClick,
+  onChevron,
+  onProfile,
+  showCeilingHint,
+}: {
+  player: RankPlayer;
+  scaleMax: number;
+  round: string;
+  last?: boolean;
+  open: boolean;
+  rowId?: string;
+  onRowClick: () => void;
+  onChevron: () => void;
+  onProfile: () => void;
+  showCeilingHint?: boolean;
+}) {
+  const money = player.inMoney;
+  return (
+    <div id={rowId} className={`wc-rk-row${money ? " money" : ""}`} style={{ borderBottom: last && !open ? "none" : "1px solid var(--line)", background: money ? "var(--gold-soft)" : "transparent" }}>
+      {money && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: "linear-gradient(180deg,#F6E7A6,#E7C56A 55%,#C99A38)" }} />}
+      <div onClick={onRowClick} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px 13px 18px" }}>
+        <div style={{ width: 26, flex: "none", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+          <span className="wc-num" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1, color: money ? "var(--gold)" : "var(--text)" }}>{player.rank > 0 ? player.rank : "—"}</span>
+          <Mover value={player.mover} showZero={false} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+            <span style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: "-0.01em", whiteSpace: "nowrap" }}>{player.me ? "You" : player.name}</span>
+            {player.me && <span className="wc-tag-you">You</span>}
           </div>
-          <div style={{ marginTop: 12 }}>
-            <CeilingBar points={player.points} ceiling={player.ceiling} scaleMax={scaleMax} />
+          <FlagRow teams={player.teams} size={20} />
+        </div>
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "flex-end", gap: 3 }}>
+              <span className="wc-num" style={{ fontSize: 23, fontWeight: 600, lineHeight: 1 }}>{player.points}</span>
+              <span className="wc-eyebrow" style={{ fontSize: 9 }}>pts</span>
+            </div>
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+              {showCeilingHint && <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)" }}>↗{player.ceiling}</span>}
+              <MoneyContext player={player} />
+            </div>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 12 }}>
-            {player.teams.map((team) => (
-              <TeamEntityLink key={`${team.tier}-${team.code}`} team={team}>
-                <span
-                  className="wc-pill"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "5px 8px",
-                    fontSize: 10.5,
-                    opacity: team.alive ? 1 : 0.55,
-                  }}
-                >
-                  <span>{team.flag}</span>
-                  <span>{team.tier}</span>
-                  <span className="wc-num" style={{ color: team.alive ? "var(--lime-ink)" : "var(--faint)" }}>
-                    {team.pts}+{team.alive ? team.rem : 0}
-                  </span>
-                </span>
-              </TeamEntityLink>
-            ))}
-          </div>
-          <div style={{ color: "var(--dim)", fontSize: 12.5, lineHeight: 1.45, marginTop: 11 }}>
-            {aliveTeams.length
-              ? `${aliveTeams.length} live ${aliveTeams.length === 1 ? "team" : "teams"} can still add points.`
-              : "No teams can add more points; this ceiling is final."}
-            {moneyGap ? ` ${moneyGap} ${moneyGap === 1 ? "point" : "points"} from the payout line.` : ""}
+          <span onClick={(event) => { event.stopPropagation(); onChevron(); }} style={{ display: "flex", padding: 4, margin: -4 }}>
+            <svg className={`wc-rk-chev${open ? " open" : ""}`} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4" /></svg>
+          </span>
+        </div>
+      </div>
+      {open && (
+        <div className="wc-rk-drawer" style={{ padding: "0 16px 16px 18px" }}>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+            <RowDrawer player={player} scaleMax={scaleMax} round={round} onProfile={onProfile} />
           </div>
         </div>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onProfile();
-          }}
-          className="wc-pill"
-          style={{
-            cursor: "pointer",
-            color: "var(--lime-ink)",
-            borderColor: "var(--lime-line)",
-            background: "transparent",
-            fontFamily: "inherit",
-            whiteSpace: "nowrap",
-          }}
-        >
-          View full profile →
-        </button>
+      )}
+    </div>
+  );
+}
+
+function LeanRowDesktop({
+  player,
+  scaleMax,
+  round,
+  last,
+  open,
+  rowId,
+  onRowClick,
+  onChevron,
+  onProfile,
+  showCeilingHint,
+}: {
+  player: RankPlayer;
+  scaleMax: number;
+  round: string;
+  last?: boolean;
+  open: boolean;
+  rowId?: string;
+  onRowClick: () => void;
+  onChevron: () => void;
+  onProfile: () => void;
+  showCeilingHint?: boolean;
+}) {
+  const money = player.inMoney;
+  return (
+    <div id={rowId} className={`wc-rk-row${money ? " money" : ""}`} style={{ borderBottom: last && !open ? "none" : "1px solid var(--line)", background: money ? "var(--gold-soft)" : "transparent" }}>
+      {money && <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: "linear-gradient(180deg,#F6E7A6,#E7C56A 55%,#C99A38)" }} />}
+      <div onClick={onRowClick} style={{ display: "grid", gridTemplateColumns: "52px 1fr 92px 150px 60px 28px", alignItems: "center", gap: 16, padding: "13px 22px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="wc-num" style={{ fontSize: 19, fontWeight: 600, color: money ? "var(--gold)" : "var(--text)" }}>{player.rank > 0 ? player.rank : "—"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 13, minWidth: 0 }}>
+          <div className="wc-avatar" style={{ background: player.me ? "var(--lime)" : "var(--surface-3)", color: player.me ? "var(--on-lime)" : "var(--dim)" }}>{player.short}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: "-0.01em" }}>{player.me ? "You" : player.name}</span>
+              {player.me && <span className="wc-tag-you">You</span>}
+            </div>
+            <div style={{ marginTop: 7 }}><FlagRow teams={player.teams} size={19} /></div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <span className="wc-num" style={{ fontSize: 21, fontWeight: 600 }}>{player.points}</span>
+          <span className="wc-eyebrow" style={{ fontSize: 9, marginLeft: 4 }}>pts</span>
+          {showCeilingHint && <div className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", marginTop: 3 }}>↗ {player.ceiling}</div>}
+        </div>
+        <div style={{ textAlign: "right" }}><MoneyContext player={player} /></div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}><Mover value={player.mover} /></div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <span onClick={(event) => { event.stopPropagation(); onChevron(); }} style={{ display: "flex", padding: 4, margin: -4, cursor: "pointer" }}>
+            <svg className={`wc-rk-chev${open ? " open" : ""}`} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4" /></svg>
+          </span>
+        </div>
       </div>
+      {open && (
+        <div className="wc-rk-drawer" style={{ padding: "0 22px 18px 22px" }}>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 28 }}>
+            <div>
+              <SectionLabel style={{ marginBottom: 10 }}>Points vs ceiling</SectionLabel>
+              <CeilingExplain player={player} scaleMax={scaleMax} />
+              <div style={{ marginTop: 16 }}>
+                <SectionLabel style={{ marginBottom: 10 }}>Scoring rounds left</SectionLabel>
+                <StageTracker round={round} />
+              </div>
+            </div>
+            <div>
+              <SectionLabel style={{ marginBottom: 10 }}>Still winnable from</SectionLabel>
+              <ContribChips player={player} />
+              <button
+                className="wc-btn wc-btn-ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onProfile();
+                }}
+                style={{ marginTop: 16, padding: "10px 14px", fontSize: 13, width: "100%" }}
+                type="button"
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  View full profile
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h9M8 4l4 4-4 4" /></svg>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function YouAnchor({
+  player,
+  moneyCutoffPoints,
+  onJump,
+  compact,
+}: {
+  player: SerializedPlayer;
+  moneyCutoffPoints?: number | null;
+  onJump: () => void;
+  compact?: boolean;
+}) {
+  const ranked = player.rank > 0;
+  const me = rankPlayer(player, moneyCutoffPoints ?? null);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: compact ? "10px 14px" : "12px 16px", background: "var(--surface)", border: "1px solid var(--lime-line)", borderRadius: 14, boxShadow: "0 -6px 24px -16px rgba(0,0,0,0.5), 0 0 0 1px var(--lime-line)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+        <span className="wc-num" style={{ fontSize: 18, fontWeight: 600, color: me.inMoney ? "var(--gold)" : "var(--text)" }}>{ranked ? me.rank : "—"}</span>
+        <div className="wc-avatar" style={{ width: 28, height: 28, borderRadius: 8, background: "var(--lime)", color: "var(--on-lime)" }}>{me.short}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>You</span>
+            <Mover value={me.mover} showZero={false} />
+          </div>
+          <div className="wc-num" style={{ fontSize: 10.5, color: "var(--dim)", marginTop: 1 }}>
+            {me.points} pts · {me.inMoney ? "in the money" : me.toMoney > 0 ? `${me.toMoney} from money` : "outside money"}
+          </div>
+        </div>
+      </div>
+      <button className="wc-rk-jump" onClick={onJump} type="button">
+        Jump to me
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 11V3M3.5 6.5L7 3l3.5 3.5" /></svg>
+      </button>
     </div>
   );
 }
@@ -487,7 +715,7 @@ export function Leaderboard() {
       >
         {/* main table */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-        {showMyJump && currentVisiblePlayer && <MyStandingJump player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} />}
+        {showMyJump && currentVisiblePlayer && <YouAnchor player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} />}
         <div className="wc-card" style={{ overflow: "hidden", minWidth: 0 }}>
           <div
             style={{
@@ -514,17 +742,17 @@ export function Leaderboard() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: DESKTOP_GRID,
+              gridTemplateColumns: "52px 1fr 92px 150px 60px 28px",
               gap: 12,
               padding: "0 18px 10px",
               borderBottom: "1px solid var(--line)",
             }}
           >
-            {["Rank", "Player", "Ceiling", "Pts", "Payout", "Move"].map((h, i) => (
+            {["Rank", "Player", "Pts", "Payout", "Move", ""].map((h, i) => (
               <span
                 key={h}
                 className="wc-eyebrow"
-                style={{ textAlign: i >= 3 ? "right" : "left", fontSize: 9.5 }}
+                style={{ textAlign: i >= 2 ? "right" : "left", fontSize: 9.5 }}
               >
                 {h}
               </span>
@@ -536,20 +764,22 @@ export function Leaderboard() {
             W.players.map((p, i) => {
               const rowKey = playerKey(p, "desktop", i);
               const hidden = (viewerPending && !p.me) || (!picksArePublic && !p.me);
+              const display = rankPlayer(hidden ? { ...p, teams: [], points: 0, ceiling: 0, mover: 0, payout: 0, rank: 0 } : p, moneyCutoffPoints);
+              const open = !hidden && openPlayerKey === rowKey;
               return (
               <Fragment key={rowKey}>
-                <DesktopRow
-                  p={p}
+                <LeanRowDesktop
+                  player={display}
                   scaleMax={W.scaleMax}
+                  round={W.round}
                   last={i === W.players.length - 1}
-                  moneyCutoffPoints={moneyCutoffPoints}
-                  hidePicks={hidden}
                   rowId={p.me ? "leaderboard-me-row-desktop" : undefined}
-                  onClick={hidden ? undefined : () => togglePlayer(p, "desktop", i)}
+                  open={open}
+                  onRowClick={hidden ? () => undefined : () => togglePlayer(p, "desktop", i)}
+                  onChevron={hidden ? () => undefined : () => togglePlayer(p, "desktop", i)}
+                  onProfile={() => goToPlayer(p.name)}
+                  showCeilingHint
                 />
-                {!hidden && openPlayerKey === rowKey && (
-                  <RowDrawer player={p} scaleMax={W.scaleMax} moneyCutoffPoints={moneyCutoffPoints} onProfile={() => goToPlayer(p.name)} />
-                )}
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
             );})
@@ -856,20 +1086,22 @@ export function Leaderboard() {
               {W.players.map((p, i) => {
               const rowKey = playerKey(p, "mobile", i);
               const hidden = (viewerPending && !p.me) || (!picksArePublic && !p.me);
+              const display = rankPlayer(hidden ? { ...p, teams: [], points: 0, ceiling: 0, mover: 0, payout: 0, rank: 0 } : p, moneyCutoffPoints);
+              const open = !hidden && openPlayerKey === rowKey;
               return (
               <Fragment key={rowKey}>
-                <MobileRow
-                  p={p}
+                <LeanRowMobile
+                  player={display}
                   scaleMax={W.scaleMax}
+                  round={W.round}
                   last={i === W.players.length - 1}
-                  moneyCutoffPoints={moneyCutoffPoints}
-                  hidePicks={hidden}
                   rowId={p.me ? "leaderboard-me-row-mobile" : undefined}
-                  onClick={hidden ? undefined : () => togglePlayer(p, "mobile", i)}
+                  open={open}
+                  onRowClick={hidden ? () => undefined : () => togglePlayer(p, "mobile", i)}
+                  onChevron={hidden ? () => undefined : () => togglePlayer(p, "mobile", i)}
+                  onProfile={() => goToPlayer(p.name)}
+                  showCeilingHint
                 />
-                {!hidden && openPlayerKey === rowKey && (
-                  <RowDrawer player={p} scaleMax={W.scaleMax} moneyCutoffPoints={moneyCutoffPoints} onProfile={() => goToPlayer(p.name)} />
-                )}
                 {picksArePublic && p.rank === 3 && <MoneyLine />}
               </Fragment>
             );})}
@@ -890,11 +1122,29 @@ export function Leaderboard() {
                 paddingTop: 18,
               }}
             >
-              <MyStandingJump player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} />
+              <YouAnchor player={currentVisiblePlayer} moneyCutoffPoints={moneyCutoffPoints} onJump={jumpToMyRow} compact />
             </div>
           </>
         )}
       </div>
+      <style jsx global>{`
+        @keyframes wc-rk-flash { 0%{ background:var(--lime-soft); } 100%{ background:transparent; } }
+        .wc-rk-row { position:relative; cursor:pointer; transition:background .14s; }
+        .wc-rk-row:hover { background:var(--surface-2); }
+        .wc-rk-row.money:hover { background:var(--gold-soft); }
+        .wc-rk-flash { animation:wc-rk-flash 1.8s ease-out; }
+        .wc-rk-chev { transition:transform .2s ease; color:var(--faint); flex:none; }
+        .wc-rk-chev.open { transform:rotate(180deg); }
+        .wc-rk-drawer { overflow:hidden; }
+        .wc-rk-seg { display:inline-flex; gap:2px; padding:2px; background:var(--surface-2); border:1px solid var(--line); border-radius:9px; }
+        .wc-rk-jump { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:0.04em;
+                      text-transform:uppercase; color:var(--on-lime); background:var(--lime); border:none; border-radius:999px; padding:7px 13px; cursor:pointer;
+                      box-shadow:0 6px 18px -8px var(--lime-line); }
+        .wc-rk-pip { flex:1; height:4px; border-radius:2px; }
+        @media (max-width: 720px) {
+          .wc-rk-jump { padding:7px 11px; }
+        }
+      `}</style>
     </>
   );
 }
