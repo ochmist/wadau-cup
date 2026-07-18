@@ -101,7 +101,19 @@ export async function recomputeStandings(db: Firestore, poolId = POOL_ID) {
 
   const batch = db.batch();
   for (const p of players) {
+    const pickUpdates = Object.fromEntries(
+      p.teams.map((team) => [
+        `picks.${team.tier}`,
+        {
+          code: team.code,
+          pts: team.pts,
+          rem: team.rem,
+          alive: team.alive,
+        },
+      ]),
+    );
     batch.update(db.doc(`pools/${poolId}/players/${p.uid}`), {
+      ...pickUpdates,
       points: p.points,
       ceiling: p.ceiling,
       rank: p.rank,
