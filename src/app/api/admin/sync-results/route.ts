@@ -313,7 +313,8 @@ export async function POST(req: NextRequest) {
     }
 
     await batch.commit();
-    const recompute = lockedResultCount > 0 ? await recomputeStandings(adminDb) : null;
+    const shouldRecompute = lockedResultCount > 0 || fixtureCount > 0 || clearedFixtureCount > 0;
+    const recompute = shouldRecompute ? await recomputeStandings(adminDb) : null;
 
     return NextResponse.json({
       ok: true,
