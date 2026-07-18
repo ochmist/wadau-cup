@@ -21,7 +21,7 @@ const SCORING_TABLE: Record<string, number[]> = {
   "Final · Champion": [3, 3, 3, 3, 3, 3],
 };
 
-const ROUND_ORDER = [
+const ADVANCEMENT_ROUND_ORDER = [
   "Group",
   "Round of 32",
   "Round of 16",
@@ -30,28 +30,42 @@ const ROUND_ORDER = [
   "Final",
 ] as const;
 
-const KNOCKOUT_ROUNDS = [
-    "Round of 32 · Win",
-    "Round of 16 · Win",
-    "Quarter-final · Win",
-    "Semi-final · Win",
-    "Final · Champion",
+const FIXTURE_ROUND_ORDER = [
+  "Group",
+  "Round of 32",
+  "Round of 16",
+  "Quarter-final",
+  "Semi-final",
+  "Third place",
+  "Final",
 ] as const;
 
-// Remaining max points a team can earn if they win everything from a given knockout round.
+const CHAMPIONSHIP_PATH = [
+  { round: "Round of 32", result: "Round of 32 · Win" },
+  { round: "Round of 16", result: "Round of 16 · Win" },
+  { round: "Quarter-final", result: "Quarter-final · Win" },
+  { round: "Semi-final", result: "Semi-final · Win" },
+  { round: "Final", result: "Final · Champion" },
+] as const;
+
+// Remaining max points a team can earn from its next known knockout match.
 const REMAINING_FROM_ROUND: Record<string, Record<Tier, number>> = (() => {
   const result: Record<string, Record<Tier, number>> = {};
-  for (let i = 0; i < KNOCKOUT_ROUNDS.length; i++) {
+  for (let i = 0; i < CHAMPIONSHIP_PATH.length; i++) {
     const remaining: Partial<Record<Tier, number>> = {};
     for (const tier of ["A", "B", "C", "D", "E", "F"] as Tier[]) {
       const ti = TIER_INDEX[tier];
-      remaining[tier] = KNOCKOUT_ROUNDS
+      remaining[tier] = CHAMPIONSHIP_PATH
         .slice(i)
-        .reduce((s, r) => s + (SCORING_TABLE[r]?.[ti] ?? 0), 0);
+        .reduce((s, path) => s + (SCORING_TABLE[path.result]?.[ti] ?? 0), 0);
     }
-    // Key by the round name the team is currently in (about to play)
-    result[KNOCKOUT_ROUNDS[i].replace(" · Win", "")] = remaining as Record<Tier, number>;
+    result[CHAMPIONSHIP_PATH[i].round] = remaining as Record<Tier, number>;
   }
+  const thirdPlace: Partial<Record<Tier, number>> = {};
+  for (const tier of ["A", "B", "C", "D", "E", "F"] as Tier[]) {
+    thirdPlace[tier] = pointsForResult("Third place · Win", tier);
+  }
+  result["Third place"] = thirdPlace as Record<Tier, number>;
   return result;
 })();
 
@@ -130,9 +144,14 @@ export function roundLabel(round: string): string {
 
 function nextRound(round: string): string | null {
   const label = roundLabel(round);
-  const index = ROUND_ORDER.indexOf(label as (typeof ROUND_ORDER)[number]);
-  if (index < 0 || index === ROUND_ORDER.length - 1) return null;
-  return ROUND_ORDER[index + 1];
+  const index = ADVANCEMENT_ROUND_ORDER.indexOf(label as (typeof ADVANCEMENT_ROUND_ORDER)[number]);
+  if (index < 0 || index === ADVANCEMENT_ROUND_ORDER.length - 1) return null;
+  return ADVANCEMENT_ROUND_ORDER[index + 1];
+}
+
+function fixtureRoundIndex(round: string) {
+  const index = FIXTURE_ROUND_ORDER.indexOf(round as (typeof FIXTURE_ROUND_ORDER)[number]);
+  return index < 0 ? FIXTURE_ROUND_ORDER.length : index;
 }
 
 export function computeStandings(
@@ -178,7 +197,7 @@ export function computeStandings(
         eliminated.add(loser);
       }
       const next = nextRound(round);
-      if (next) currentRound[winner] = next;
+      if (round !== "Group" && next) currentRound[winner] = next;
     }
   }
 
@@ -191,15 +210,38 @@ export function computeStandings(
     });
   }
 
+  function nextOpenRoundForTeam(code: string) {
+    const openRounds = fixtures
+      .filter((fixture) => {
+        if (fixture.a !== code && fixture.b !== code) return false;
+        if (completedResultIds.has(fixture.id)) return false;
+        return fixture.status !== "finished";
+      })
+      .map((fixture) => roundLabel(fixture.round))
+      .sort((a, b) => fixtureRoundIndex(a) - fixtureRoundIndex(b));
+    return openRounds[0] ?? null;
+  }
+
   function groupGamesLeftForTeam(code: string) {
     const scheduled = openFixturesForTeam(code, "Group").length;
     if (scheduled > 0 || fixtures.length > 0) return scheduled;
     return Math.max(0, 3 - (groupMatchesPlayed[code] ?? 0));
   }
 
+  function teamIsAlive(code: string) {
+    const openRound = nextOpenRoundForTeam(code);
+    if (eliminated.has(code)) return openRound === "Third place";
+    if (currentRound[code]) return true;
+    if (openRound) return true;
+    if (fixtures.length > 0 && (groupMatchesPlayed[code] ?? 0) > 0 && groupGamesLeftForTeam(code) === 0) {
+      return false;
+    }
+    return true;
+  }
+
   function stageGamesLeftForTeam(code: string, alive: boolean) {
     if (!alive) return 0;
-    const stage = fallbackRound;
+    const stage = nextOpenRoundForTeam(code) ?? currentRound[code] ?? fallbackRound;
     if (stage === "Group") return groupGamesLeftForTeam(code);
     return openFixturesForTeam(code, stage).length;
   }
@@ -208,7 +250,7 @@ export function computeStandings(
     if (!alive) return 0;
     const games = stageGamesLeftForTeam(code, alive);
     if (games <= 0) return 0;
-    const stage = fallbackRound;
+    const stage = nextOpenRoundForTeam(code) ?? currentRound[code] ?? fallbackRound;
     if (stage === "Group") return games * pointsForResult("Group · Win", tier);
     const key = stage === "Final" ? "Final · Champion" : `${stage} · Win`;
     return games * pointsForResult(key, tier);
@@ -216,7 +258,7 @@ export function computeStandings(
 
   function remainingForTeam(code: string, tier: Tier, alive: boolean) {
     if (!alive) return 0;
-    const round = currentRound[code] ?? fallbackRound;
+    const round = nextOpenRoundForTeam(code) ?? currentRound[code] ?? fallbackRound;
     if (round === "Group") {
       const groupWinsLeft = groupGamesLeftForTeam(code);
       return (
@@ -235,7 +277,7 @@ export function computeStandings(
         const code = p.picks[t]!;
         const tier = T[code]?.t ?? t;
         const pts = teamPts[code] ?? 0;
-        const alive = !eliminated.has(code);
+        const alive = teamIsAlive(code);
         const rem = remainingForTeam(code, tier, alive);
         const stageGamesLeft = stageGamesLeftForTeam(code, alive);
         const stagePossiblePoints = stagePossiblePointsForTeam(code, tier, alive);
