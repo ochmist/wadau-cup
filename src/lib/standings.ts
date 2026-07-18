@@ -47,7 +47,6 @@ const PROGRESSION_SCORE: Record<string, number> = {
   "Quarter-final": 3,
   "Semi-final": 4,
   Final: 5,
-  Champion: 6,
 };
 
 const UNDERDOG_TIE_TIERS = ["F", "E", "D", "C", "B"] as const;
@@ -229,10 +228,10 @@ export function computeStandings(
       const winner = r.win;
       const loser = winner === r.a ? r.b : r.a;
       const wTier = T[winner]?.t;
-      const wKey = `${round} · Win`;
+      const wKey = round === "Final" ? "Final · Champion" : `${round} · Win`;
       if (wTier) teamPts[winner] = (teamPts[winner] ?? 0) + pointsForResult(wKey, wTier);
       if (round === "Final") {
-        setTeamProgress(winner, "Champion");
+        setTeamProgress(winner, "Final");
         setTeamProgress(loser, "Final");
       }
       if (round !== "Group") {
