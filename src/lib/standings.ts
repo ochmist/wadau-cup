@@ -40,6 +40,18 @@ const FIXTURE_ROUND_ORDER = [
   "Final",
 ] as const;
 
+const PROGRESSION_SCORE: Record<string, number> = {
+  Group: 0,
+  "Round of 32": 1,
+  "Round of 16": 2,
+  "Quarter-final": 3,
+  "Semi-final": 4,
+  Final: 5,
+  Champion: 6,
+};
+
+const UNDERDOG_TIE_TIERS = ["F", "E", "D", "C", "B"] as const;
+
 const CHAMPIONSHIP_PATH = [
   { round: "Round of 32", result: "Round of 32 · Win" },
   { round: "Round of 16", result: "Round of 16 · Win" },
@@ -154,6 +166,22 @@ function fixtureRoundIndex(round: string) {
   return index < 0 ? FIXTURE_ROUND_ORDER.length : index;
 }
 
+function progressionRound(round: string) {
+  const label = roundLabel(round);
+  if (label === "Third place") return "Semi-final";
+  return label;
+}
+
+function finalGoalsTotal(results: RawResult[]) {
+  const final = results.find((result) => {
+    if (!result.win || result.win === "draw") return false;
+    if (roundLabel(result.round) !== "Final") return false;
+    return typeof result.sa === "number" && typeof result.sb === "number";
+  });
+  if (!final || typeof final.sa !== "number" || typeof final.sb !== "number") return null;
+  return final.sa + final.sb;
+}
+
 export function computeStandings(
   rawPlayers: RawPick[],
   results: RawResult[],
@@ -168,13 +196,23 @@ export function computeStandings(
   const eliminated = new Set<string>();
   const currentRound: Record<string, string> = {};
   const groupMatchesPlayed: Record<string, number> = {};
+  const teamProgress: Record<string, number> = {};
   const fallbackRound = roundLabel(tournamentRound);
   const completedResultIds = new Set(results.filter((r) => r.win).map((r) => r.id));
+  const finalGoalTotal = finalGoalsTotal(results);
+
+  function setTeamProgress(code: string | null | undefined, round: string) {
+    if (!code) return;
+    const score = PROGRESSION_SCORE[progressionRound(round)] ?? 0;
+    teamProgress[code] = Math.max(teamProgress[code] ?? 0, score);
+  }
 
   for (const r of results) {
     if (!r.win) continue;
     const round = roundLabel(r.round);
     const isDraw = r.win === "draw";
+    setTeamProgress(r.a, round);
+    setTeamProgress(r.b, round);
     if (round === "Group") {
       groupMatchesPlayed[r.a] = (groupMatchesPlayed[r.a] ?? 0) + 1;
       groupMatchesPlayed[r.b] = (groupMatchesPlayed[r.b] ?? 0) + 1;
@@ -193,12 +231,24 @@ export function computeStandings(
       const wTier = T[winner]?.t;
       const wKey = `${round} · Win`;
       if (wTier) teamPts[winner] = (teamPts[winner] ?? 0) + pointsForResult(wKey, wTier);
+      if (round === "Final") {
+        setTeamProgress(winner, "Champion");
+        setTeamProgress(loser, "Final");
+      }
       if (round !== "Group") {
         eliminated.add(loser);
       }
       const next = nextRound(round);
       if (round !== "Group" && next) currentRound[winner] = next;
     }
+  }
+
+  for (const fixture of fixtures) {
+    setTeamProgress(fixture.a, fixture.round);
+    setTeamProgress(fixture.b, fixture.round);
+  }
+  for (const [code, round] of Object.entries(currentRound)) {
+    setTeamProgress(code, round);
   }
 
   function openFixturesForTeam(code: string, round: string) {
@@ -269,6 +319,76 @@ export function computeStandings(
     return REMAINING_FROM_ROUND[round]?.[tier] ?? 0;
   }
 
+  function progressionTieScore(teams: { code: string }[]) {
+    const scores = teams.map((team) => teamProgress[team.code] ?? 0);
+    const deepest = Math.max(...scores, 0);
+    return {
+      deepest,
+      deepestCount: scores.filter((score) => score === deepest).length,
+    };
+  }
+
+  function compareFinalGoals(a: ComputedPlayer, b: ComputedPlayer) {
+    if (finalGoalTotal == null) return 0;
+    const aGuess = typeof a.finalGoals === "number" ? a.finalGoals : null;
+    const bGuess = typeof b.finalGoals === "number" ? b.finalGoals : null;
+    if (aGuess == null && bGuess == null) return 0;
+    if (aGuess == null) return 1;
+    if (bGuess == null) return -1;
+    return Math.abs(aGuess - finalGoalTotal) - Math.abs(bGuess - finalGoalTotal);
+  }
+
+  function tieMetrics(player: ComputedPlayer) {
+    const progress = progressionTieScore(player.teams);
+    const underdogPoints = Object.fromEntries(
+      UNDERDOG_TIE_TIERS.map((tier) => [
+        tier,
+        player.teams
+          .filter((team) => team.tier === tier)
+          .reduce((sum, team) => sum + team.pts, 0),
+      ]),
+    ) as Record<(typeof UNDERDOG_TIE_TIERS)[number], number>;
+    const finalGoalDistance = finalGoalTotal == null
+      ? null
+      : typeof player.finalGoals === "number"
+        ? Math.abs(player.finalGoals - finalGoalTotal)
+        : Number.MAX_SAFE_INTEGER;
+    return { progress, underdogPoints, finalGoalDistance };
+  }
+
+  function compareTiedPoints(a: ComputedPlayer, b: ComputedPlayer) {
+    const aMetrics = tieMetrics(a);
+    const bMetrics = tieMetrics(b);
+    const progression =
+      bMetrics.progress.deepest - aMetrics.progress.deepest ||
+      bMetrics.progress.deepestCount - aMetrics.progress.deepestCount;
+    if (progression) return progression;
+    for (const tier of UNDERDOG_TIE_TIERS) {
+      const tierDiff = bMetrics.underdogPoints[tier] - aMetrics.underdogPoints[tier];
+      if (tierDiff) return tierDiff;
+    }
+    return compareFinalGoals(a, b);
+  }
+
+  function compareRankOrder(a: ComputedPlayer, b: ComputedPlayer) {
+    const aRankable = (a.approvalStatus ?? "approved") === "approved" && a.paid && a.teams.length > 0;
+    const bRankable = (b.approvalStatus ?? "approved") === "approved" && b.paid && b.teams.length > 0;
+    if (aRankable !== bRankable) return aRankable ? -1 : 1;
+    if (!aRankable || !bRankable) return a.name.localeCompare(b.name);
+    return b.points - a.points || compareTiedPoints(a, b) || a.name.localeCompare(b.name);
+  }
+
+  function rankingTieKey(player: ComputedPlayer) {
+    const metrics = tieMetrics(player);
+    return [
+      player.points,
+      metrics.progress.deepest,
+      metrics.progress.deepestCount,
+      ...UNDERDOG_TIE_TIERS.map((tier) => metrics.underdogPoints[tier]),
+      metrics.finalGoalDistance ?? "pending",
+    ].join("|");
+  }
+
   const players: ComputedPlayer[] = rawPlayers.map((p) => {
     const tiers = ["A", "B", "C", "D", "E", "F"] as Tier[];
     const teams = tiers
@@ -309,32 +429,44 @@ export function computeStandings(
     };
   });
 
-  players.sort((a, b) => {
-    const aRankable = (a.approvalStatus ?? "approved") === "approved" && a.paid && a.teams.length > 0;
-    const bRankable = (b.approvalStatus ?? "approved") === "approved" && b.paid && b.teams.length > 0;
-    if (aRankable !== bRankable) return aRankable ? -1 : 1;
-    return b.points - a.points || b.ceiling - a.ceiling;
-  });
+  players.sort(compareRankOrder);
   const paidPot = rawPlayers.filter((p) => (p.approvalStatus ?? "approved") === "approved" && p.paid).length * buyin;
   const payouts: [number, number, number] = [
     Math.round(paidPot * payoutPct[0] / 100),
     Math.round(paidPot * payoutPct[1] / 100),
     Math.round(paidPot * payoutPct[2] / 100),
   ];
-  let rank = 1;
-  players.forEach((p) => {
+  const payoutForPosition = (position: number) => payouts[position - 1] ?? 0;
+  let position = 1;
+  for (let i = 0; i < players.length;) {
+    const p = players[i];
     const rankable = (p.approvalStatus ?? "approved") === "approved" && p.paid && p.teams.length > 0;
     if (!rankable) {
       p.rank = 0;
       p.mover = 0;
       p.payout = 0;
-      return;
+      i += 1;
+      continue;
     }
-    p.rank = rank;
-    rank += 1;
-    p.mover = p.prevRank > 0 ? p.prevRank - p.rank : 0;
-    p.payout = p.rank <= 3 ? payouts[p.rank - 1] : 0;
-  });
+    const key = rankingTieKey(p);
+    let end = i + 1;
+    while (end < players.length) {
+      const next = players[end];
+      const nextRankable = (next.approvalStatus ?? "approved") === "approved" && next.paid && next.teams.length > 0;
+      if (!nextRankable || rankingTieKey(next) !== key) break;
+      end += 1;
+    }
+    const tied = players.slice(i, end);
+    const groupPayout = tied.reduce((sum, _player, offset) => sum + payoutForPosition(position + offset), 0);
+    const payoutShare = groupPayout > 0 ? Math.round(groupPayout / tied.length) : 0;
+    for (const tiedPlayer of tied) {
+      tiedPlayer.rank = position;
+      tiedPlayer.mover = tiedPlayer.prevRank > 0 ? tiedPlayer.prevRank - tiedPlayer.rank : 0;
+      tiedPlayer.payout = payoutShare;
+    }
+    position += tied.length;
+    i = end;
+  }
 
   const scaleMax = Math.max(...players.map((p) => p.ceiling), 1) + 4;
   return { players, scaleMax };
