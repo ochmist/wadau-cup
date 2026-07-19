@@ -12,6 +12,7 @@ import { useStandings } from "@/hooks/useStandings";
 import { useTeamProfiles } from "@/hooks/useTeamProfiles";
 import { enrichPlayerTeams, useMyData } from "@/hooks/useMyData";
 import { useAuth } from "@/lib/auth";
+import { pointsForResult, roundLabel } from "@/lib/standings";
 import type { FixtureWithId, LiveStateWithId, ResultWithId } from "@/lib/firestore";
 import type { SerializedPlayer, TeamProfileDoc } from "@/lib/types";
 
@@ -71,6 +72,13 @@ function resultTone(result: ResultWithId, code: string) {
 
 function resultPointsForTeam(result: ResultWithId, code: string) {
   return result.pts?.find((row) => row.code === code)?.points ?? 0;
+}
+
+function winPointsForRound(round: string, code: string) {
+  const tier = T[code].t;
+  const normalized = roundLabel(round);
+  const key = normalized === "Final" ? "Final · Champion" : `${normalized} · Win`;
+  return pointsForResult(key, tier);
 }
 
 function normalizedRound(round?: string | null) {
@@ -437,7 +445,6 @@ function TeamPath({ code, fixtures, results }: { code: string; fixtures: Fixture
     .filter((result) => result.a === code || result.b === code)
     .sort((a, b) => normalizedRound(a.round).localeCompare(normalizedRound(b.round)));
   const upcoming = nextFixturesForTeam(fixtures, code).slice(0, 4);
-  const perWin = tierMeta[T[code].t].win;
   return (
     <div className="wc-card" style={{ padding: "17px 18px" }}>
       <SectionLabel>Path so far</SectionLabel>
@@ -473,12 +480,12 @@ function TeamPath({ code, fixtures, results }: { code: string; fixtures: Fixture
         <div style={{ marginTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <SectionLabel>Road ahead</SectionLabel>
-            <span className="wc-num" style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600 }}>+{perWin}/win</span>
           </div>
           <div style={{ position: "relative" }}>
             <div style={{ position: "absolute", left: 11, top: 8, bottom: 8, width: 1.5, background: "var(--line)" }} />
             {upcoming.map((fixture, index) => {
               const opponent = matchTeams(fixture, code);
+              const projected = winPointsForRound(fixture.round, code);
               return (
                 <Link key={fixture.id} href={fixtureHref(fixture.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", position: "relative", color: "var(--text)", textDecoration: "none" }}>
                   <span style={{ width: 23, height: 23, flex: "none", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1, background: fixture.status === "live" ? "var(--lime-soft)" : "var(--surface-3)", border: `1.5px solid ${fixture.status === "live" ? "var(--lime-line)" : "var(--line)"}` }}>
@@ -490,6 +497,7 @@ function TeamPath({ code, fixtures, results }: { code: string; fixtures: Fixture
                     </div>
                     <div className="wc-eyebrow" style={{ marginTop: 2 }}>{fixture.status === "live" ? "Live now" : kickoffLabel(fixture.kickoffAt)}</div>
                   </div>
+                  <span className="wc-num" style={{ fontSize: 11, color: "var(--gold)", fontWeight: 600, flex: "none" }}>+{projected} pool</span>
                 </Link>
               );
             })}

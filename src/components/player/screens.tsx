@@ -9,7 +9,7 @@ import { CeilingBar, MiniStanding, Mover, fmtKES } from "@/components/ds";
 import { Btn, PageHead, SectionLabel, TierBadge } from "@/components/ui";
 import { TeamLine } from "@/components/player/parts";
 import { fixtureHref, TeamEntityLink } from "@/components/entity-links";
-import { T, tierMeta } from "@/lib/data";
+import { T } from "@/lib/data";
 import { useStandings } from "@/hooks/useStandings";
 import { useMyData, enrichPlayerTeams } from "@/hooks/useMyData";
 import { useResults } from "@/hooks/useResults";
@@ -19,6 +19,7 @@ import { useAuth } from "@/lib/auth";
 import { useCountdown } from "@/lib/countdown";
 import { EdgeBanner } from "@/components/edge/EdgeBanner";
 import { displayPhone } from "@/lib/phone";
+import { pointsForResult, roundLabel } from "@/lib/standings";
 import type { FixtureWithId, LiveStateWithId, ResultWithId } from "@/lib/firestore";
 import type { SerializedPlayer, Tier } from "@/lib/types";
 import type { PlayerTeam } from "@/lib/data";
@@ -754,6 +755,12 @@ function signedPoints(points: number) {
   return points > 0 ? `+${points}` : `${points}`;
 }
 
+function winPointsForRound(round: string, tier: Tier) {
+  const normalized = roundLabel(round);
+  const key = normalized === "Final" ? "Final · Champion" : `${normalized} · Win`;
+  return pointsForResult(key, tier);
+}
+
 function teamResultPoints(team: ProfileTeam, result: ResultWithId) {
   const pointRow = (result.pts ?? [])
     .map(pointEventTuple)
@@ -824,7 +831,6 @@ function TeamPathDrawer({
   liveState: LiveStateWithId[];
   results: ResultWithId[];
 }) {
-  const perWin = tierMeta[team.tier]?.win ?? 1;
   const banked = [...results]
     .filter((result) => result.a === team.code || result.b === team.code)
     .sort((a, b) => resultSortKey(a) - resultSortKey(b))
@@ -859,6 +865,7 @@ function TeamPathDrawer({
         score: teamScore == null || opponentScore == null ? undefined : `${teamScore}-${opponentScore}`,
         minute: live?.minute ?? null,
         kickoffAt: fixture.kickoffAt,
+        points: winPointsForRound(fixture.round, team.tier),
       };
     }) : [];
   const drawerRowStyle = {
@@ -890,7 +897,7 @@ function TeamPathDrawer({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <span className="wc-eyebrow" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>How {team.name} earned</span>
         <span className="wc-num" style={{ fontSize: 10.5, color: "var(--faint)", whiteSpace: "nowrap" }}>
-          Tier {team.tier} · +{perWin}/win
+          Tier {team.tier}
         </span>
       </div>
 
@@ -930,7 +937,7 @@ function TeamPathDrawer({
 
       {alive && future.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 11, borderTop: "1px solid var(--line)" }}>
-          <span className="wc-eyebrow" style={{ display: "block", marginBottom: 8 }}>Still to play · each win +{perWin}</span>
+          <span className="wc-eyebrow" style={{ display: "block", marginBottom: 8 }}>Still to play</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {future.map((match, index) => (
               <div
@@ -963,7 +970,7 @@ function TeamPathDrawer({
                   </div>
                 </div>
                 <span className="wc-num" style={{ ...futurePointsStyle, color: match.live ? "var(--lime-ink)" : "var(--gold)" }}>
-                  +{perWin}{match.live ? " if it holds" : " if they win"}
+                  +{match.points}{match.live ? " if it holds" : " if they win"}
                 </span>
               </div>
             ))}
