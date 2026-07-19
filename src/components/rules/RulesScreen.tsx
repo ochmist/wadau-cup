@@ -112,7 +112,7 @@ function ScoringTableNote() {
 const TIEBREAKERS: [string, string][] = [
   [
     "Deepest progression",
-    "Whoever’s teams collectively reached the furthest round wins — Champion beats Finalist beats Semifinalist, and so on. Still level? More teams at that deepest round.",
+    "Whoever’s teams reached the furthest stage wins. Final is the top stage, so champion and runner-up both count as Final; third-place matches stay at Semi-final progression. Still level? More teams at that deepest stage.",
   ],
   ["Underdog points", "More points earned from the weakest tiers, compared Tier F first, then E, D, C, B."],
   ["Final-goals guess", "The pre-committed prediction of total goals in the Final. Closest wins."],

@@ -151,6 +151,58 @@ function PaymentInfoCard({ buyin }: { buyin: number }) {
   );
 }
 
+const TIEBREAKER_STEPS = [
+  "Total points",
+  "Deepest stage reached by any pick",
+  "More picks at that deepest stage",
+  "Underdog points: F, E, D, C, B",
+  "Final-goals guess, once the Final is played",
+] as const;
+
+function TieBreakerExplainer() {
+  return (
+    <div className="wc-card" style={{ padding: "16px 18px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+        <SectionLabel>Rank tie-breakers</SectionLabel>
+        <Link href="/rules" style={{ color: "var(--lime-ink)", fontSize: 11.5, fontWeight: 800, textDecoration: "none", whiteSpace: "nowrap" }}>
+          Rules →
+        </Link>
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--dim)", marginTop: 8, lineHeight: 1.5 }}>
+        Used only when players are tied on points. Final is the highest stage; champion and runner-up both count as Final.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 12 }}>
+        {TIEBREAKER_STEPS.map((step, index) => (
+          <div key={step} style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span
+              className="wc-num"
+              style={{
+                width: 20,
+                height: 20,
+                flex: "none",
+                borderRadius: 7,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "var(--surface-3)",
+                color: "var(--faint)",
+                fontSize: 10.5,
+                fontWeight: 700,
+              }}
+            >
+              {index + 1}
+            </span>
+            <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 600, lineHeight: 1.25 }}>{step}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 11, lineHeight: 1.45 }}>
+        Third-place matches score points, but do not move progression beyond Semi-final.
+      </div>
+    </div>
+  );
+}
+
 type RankStage = { key: string; short: string; state: "done" | "current" | "future" };
 
 type RankPlayer = SerializedPlayer & {
@@ -866,6 +918,7 @@ export function Leaderboard() {
           <Link href="/world-cup" className="wc-card" style={{ padding: "14px 18px", color: "var(--lime-ink)", textDecoration: "none", fontSize: 13.5, fontWeight: 800 }}>
             World Cup table →
           </Link>
+          {picksArePublic && <TieBreakerExplainer />}
 
           {/* biggest mover */}
           <div className="wc-card" style={{ padding: "18px 20px" }}>
@@ -1055,6 +1108,11 @@ export function Leaderboard() {
           <Link href="/world-cup" className="wc-card" style={{ display: "block", marginTop: 12, padding: "12px 14px", color: "var(--lime-ink)", textDecoration: "none", fontSize: 13, fontWeight: 800 }}>
             World Cup table →
           </Link>
+          {picksArePublic && (
+            <div style={{ marginTop: 12 }}>
+              <TieBreakerExplainer />
+            </div>
+          )}
 
           {/* round status row */}
           <div
