@@ -149,8 +149,11 @@ export function pointsForResult(
 
 export function roundLabel(round: string): string {
   // Normalize "Group F", "Group Stage" → "Group"; keep R16 etc as-is.
-  if (round.startsWith("Group")) return "Group";
-  return round;
+  const label = round.trim();
+  const lower = label.toLowerCase();
+  if (lower.startsWith("group")) return "Group";
+  if (lower.includes("third") || lower.includes("3rd") || lower.includes("bronze")) return "Third place";
+  return label;
 }
 
 function nextRound(round: string): string | null {
