@@ -15,8 +15,11 @@ const SCORING_TABLE: Record<string, number[]> = {
 };
 
 function roundLabel(round: string) {
-  if (round.startsWith("Group")) return "Group";
-  return round;
+  const label = round.trim();
+  const lower = label.toLowerCase();
+  if (lower.startsWith("group")) return "Group";
+  if (lower.includes("third") || lower.includes("3rd") || lower.includes("bronze")) return "Third place";
+  return label;
 }
 
 function pointsFor(round: string, outcome: "win" | "draw", tier: Tier) {
