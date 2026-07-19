@@ -7,6 +7,7 @@ import { FieldValue } from "firebase-admin/firestore";
 
 import { POOL_ID } from "@/lib/config";
 import { buildResultDoc } from "@/lib/server/result-doc";
+import { recomputeStandings } from "@/lib/server/recompute-standings";
 import type { PlayerDoc } from "@/lib/types";
 
 async function verifyAdmin(token: string) {
@@ -86,7 +87,8 @@ export async function POST(req: NextRequest) {
       },
     });
     await batch.commit();
-    return NextResponse.json({ ok: true });
+    const recompute = await recomputeStandings(adminDb);
+    return NextResponse.json({ ok: true, recompute });
   } catch (e: unknown) {
     console.error("[admin/result]", e);
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
@@ -121,7 +123,8 @@ export async function DELETE(req: NextRequest) {
     });
     batch.delete(resultRef);
     await batch.commit();
-    return NextResponse.json({ ok: true });
+    const recompute = await recomputeStandings(adminDb);
+    return NextResponse.json({ ok: true, recompute });
   } catch (e: unknown) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
